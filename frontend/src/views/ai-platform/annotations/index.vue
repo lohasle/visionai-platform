@@ -101,7 +101,7 @@
             导出快照
           </el-button>
           <el-button v-if="task.externalBindingId" link type="primary" @click="openWorkbench(task)">
-            打开 CVAT
+            内嵌 CVAT
           </el-button>
           <el-button v-if="task.currentRevisionId" link @click="showDetail(task)"
             >查看 Revision</el-button
@@ -191,10 +191,19 @@
         }}</el-descriptions-item>
       </el-descriptions>
     </el-dialog>
+
+    <EmbeddedWorkbench
+      v-model="workbenchVisible"
+      provider="CVAT"
+      :title="workbenchTitle"
+      :context="workbenchContext"
+      :url="workbenchUrl"
+    />
   </main>
 </template>
 
 <script lang="ts" setup>
+import EmbeddedWorkbench from '@/views/ai-platform/components/EmbeddedWorkbench.vue'
 import {
   createAnnotationTask,
   exportAnnotationTask,
@@ -242,6 +251,10 @@ const saving = ref(false)
 const createVisible = ref(false)
 const mappingVisible = ref(false)
 const detailVisible = ref(false)
+const workbenchVisible = ref(false)
+const workbenchUrl = ref('')
+const workbenchTitle = ref('CVAT 标注工作台')
+const workbenchContext = ref('')
 const detail = ref<Awaited<ReturnType<typeof getAnnotationTask>>>()
 const query = reactive({ pageNo: 1, pageSize: 50, status: '' })
 const form = reactive({
@@ -358,7 +371,10 @@ const exportSnapshot = async (task: AnnotationTask) => {
 }
 const openWorkbench = async (task: AnnotationTask) => {
   const data = await openAnnotationWorkbench(projectId.value!, task.id)
-  window.open(data.url, '_blank', 'noopener,noreferrer')
+  workbenchUrl.value = data.url
+  workbenchTitle.value = task.name
+  workbenchContext.value = `VisionAI Task #${task.id} · ${task.taskType} · ${statusText(task.status)}`
+  workbenchVisible.value = true
 }
 const showDetail = async (task: AnnotationTask) => {
   detail.value = await getAnnotationTask(projectId.value!, task.id)

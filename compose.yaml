@@ -374,6 +374,9 @@ services:
       traefik.http.services.cvat-api.loadbalancer.server.port: "8080"
       traefik.http.routers.cvat-api.rule: "PathPrefix(`/api/`) || PathPrefix(`/static/`) || PathPrefix(`/admin`) || PathPrefix(`/django-rq`)"
       traefik.http.routers.cvat-api.entrypoints: web
+      traefik.http.routers.cvat-api.middlewares: cvat-visionai-embed
+      traefik.http.middlewares.cvat-visionai-embed.headers.customresponseheaders.X-Frame-Options: ""
+      traefik.http.middlewares.cvat-visionai-embed.headers.contentsecuritypolicy: "frame-ancestors 'self' ${VISIONAI_WORKBENCH_ORIGIN:-http://localhost:48080} http://127.0.0.1:48080"
     volumes:
       - visionai-cvat-data:/home/django/data
       - visionai-cvat-keys:/home/django/keys
@@ -426,6 +429,7 @@ services:
       traefik.http.routers.cvat-ui.rule: "PathPrefix(`/`)"
       traefik.http.routers.cvat-ui.entrypoints: web
       traefik.http.routers.cvat-ui.priority: 1
+      traefik.http.routers.cvat-ui.middlewares: cvat-visionai-embed
     networks:
       - visionai-cvat
     healthcheck:

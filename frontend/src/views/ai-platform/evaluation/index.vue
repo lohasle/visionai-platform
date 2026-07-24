@@ -66,10 +66,18 @@
         </el-table>
       </template>
     </el-drawer>
+    <EmbeddedWorkbench
+      v-model="workbenchVisible"
+      provider="FiftyOne"
+      :title="workbenchTitle"
+      :context="workbenchContext"
+      :url="workbenchUrl"
+    />
   </main>
 </template>
 
 <script lang="ts" setup>
+import EmbeddedWorkbench from '@/views/ai-platform/components/EmbeddedWorkbench.vue'
 import { getProjectPage, type Project } from '@/api/ai-platform/projects'
 import {
   createEvaluationRun, createEvaluationSuite, getEvaluationRun, getEvaluationRuns,
@@ -88,6 +96,10 @@ const detail = ref<Awaited<ReturnType<typeof getEvaluationRun>>>()
 const suiteVisible = ref(false)
 const runVisible = ref(false)
 const detailVisible = ref(false)
+const workbenchVisible = ref(false)
+const workbenchUrl = ref('')
+const workbenchTitle = ref('FiftyOne 评估工作台')
+const workbenchContext = ref('')
 const suiteForm = reactive({ name: '', datasetVersionId: 3, gatePolicy: 'MUST_PASS', map: 0.5, recall: 0.5 })
 const runForm = reactive({ trainingRunId: 1, baselineRunId: 0 })
 const passedCount = computed(() => runs.value.filter((run) => run.gateDecision === 'PASSED').length)
@@ -130,7 +142,11 @@ const filterSamples = async (name: string) => {
 const workbench = async () => {
   if (!detail.value) return
   const result = await openEvaluationWorkbench(projectId.value!, detail.value.run.id)
-  message.success(`已授权数据集 ${result.dataset}`)
+  workbenchUrl.value = result.url
+  workbenchTitle.value = `EvaluationRun #${detail.value.run.id}`
+  workbenchContext.value = `${result.dataset} · TrainingRun #${detail.value.run.trainingRunId} · ${detail.value.run.gateDecision}`
+  workbenchVisible.value = true
+  message.success(`已授权并载入数据集 ${result.dataset}`)
 }
 const formatMetric = (metric: EvaluationMetric) => ['FP', 'FN'].includes(metric.name) ? metric.value : metric.value.toFixed(3)
 onMounted(async () => {
