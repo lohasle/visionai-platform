@@ -1,40 +1,98 @@
-# Nimbus Framework Go
+# VisionAI 企业级计算机视觉算法平台
 
-Nimbus Framework 的 Go 1.26 模块化单体版。它以 Java Nimbus 底座为功能源进行迁移，保留统一的新 UI 与兼容的前端接口契约，默认使用 MySQL 8.4。
+VisionAI 是一套从数据进入、标注、数据集版本化、训练、评估、模型审批、部署推理到生产反馈闭环的企业级计算机视觉平台。项目基于 [lohasle/nimbus-framework-go](https://github.com/lohasle/nimbus-framework-go) 构建，后端采用 Go 模块化单体与异步编排器，前端采用 Vue 3，基础设施由 Docker Compose 一键拉起。
 
-工程按前后端分层：`frontend/` 是 Nimbus Vue 运营后台，`backend/` 是 Go 后端；Go 后端在 `internal/modules/` 下按 System、Infra、Member、Pay 等中心划分模块，公共技术能力位于 `internal/platform/`。
+## 一键启动
 
-## 边界
-
-- `system`：运营后台用户、角色、菜单、部门、岗位、字典、租户、审计日志、OAuth2、通知、邮件与短信管理。
-- `infra`：参数与文件配置、文件管理、访问/错误日志、数据源、定时任务、任务日志与 Redis 监控。
-- `member`：会员、等级、分组、标签与积分流水。
-- `pay`：支付应用、渠道、订单与退款核心管理闭环。
-- `application`、`im`、`app`：扩展模板，当前仅提供健康接口，不预建业务实体。
-- 所有公开 HTTP 接口由 Swagger 注释生成 OpenAPI 文档。
-- 认证使用独立的 Access Token 与 Refresh Token，并支持令牌轮换。
-
-## 本地启动
+前置条件：Docker Desktop 4.40+（Windows 使用 WSL2 后端）或 Docker Engine 27+，建议至少 8 核 CPU、16 GB 内存和 30 GB 可用磁盘。
 
 ```bash
-./scripts/init-local.sh
-export NIMBUS_DB_DSN='nimbus:nimbus_dev@tcp(127.0.0.1:23316)/nimbus_platform_go?charset=utf8mb4&parseTime=True&loc=Local'
-cd backend
-make test build
-cd ..
-./scripts/start-all.sh
-./scripts/status-all.sh
+docker compose up -d --build --wait
 ```
 
-- API: `http://localhost:58080`
-- Swagger: `http://localhost:58080/swagger/index.html`
-- MySQL: `127.0.0.1:23316`
-- Redis: `127.0.0.1:27316`（仅作为缓存监控基础设施，不替代 MySQL 主数据库）
-- 默认租户：`Nimbus Framework`
-- 默认账号：`admin / admin123`（仅本地初始化；生产环境必须通过环境变量覆盖）
+Windows PowerShell 也可执行：
 
-前端地址为 `http://localhost:3000`。视觉基线与 Java 两版一致；只有后端语言和部署形态不同。
+```powershell
+.\scripts\bootstrap.ps1
+```
 
-工程文档从 [docs/README.md](docs/README.md) 开始；Agent 与自动化工具从 [AGENTS.md](AGENTS.md) 开始。
+启动完成后：
 
-停止本地前后端执行 `./scripts/stop-all.sh`；运行接口冒烟测试执行 `./scripts/test-functional.sh`。
+- 平台：http://localhost:48080
+- 账号：`admin / admin123`
+- Swagger：http://localhost:58080/swagger/index.html
+- CVAT：http://localhost:28080（`visionai / visionai_cvat_dev`）
+- FiftyOne：http://localhost:25151
+- MinIO Console：http://localhost:29001（`visionai / visionai_minio_dev`）
+- 推理 API：http://localhost:28000/docs
+
+默认口令仅用于本地验收。任何共享或生产环境都必须通过 `.env` 覆盖。
+
+## 验证
+
+```bash
+make test
+make e2e
+```
+
+Windows：
+
+```powershell
+.\scripts\doctor.ps1
+.\scripts\e2e.ps1
+```
+
+GPU 可选栈：
+
+```bash
+./scripts/doctor-gpu.sh
+docker compose -f compose.yaml -f compose.gpu.yaml --profile inference-gpu --profile gpu-worker up -d
+```
+
+## 产品能力
+
+- 多租户、项目成员、角色与数据域隔离
+- 图片/视频资产、分片上传、批量导入、质量检测、集合冻结
+- CVAT 标注、预标注、复核、导出与不可变修订
+- 数据集 Manifest、训练/验证/测试拆分、校验、冻结和追溯
+- 训练模板、Smoke Test、LocalDocker/ClearML Provider、实验对比
+- FiftyOne 评估工作台、困难样本切片、基线回归门禁
+- 模型卡、制品哈希、供应链证据、四眼审批
+- 不可变部署修订、图片/视频推理、监控告警、回滚与重启
+- 低置信度/空结果/错误反馈采集、去重、回流 CVAT 与再训练谱系
+- GPU 节点、队列、项目配额、集成健康、兼容矩阵和审计导出
+
+完整说明见 [产品手册](docs/产品手册.md)，测试证据见 [验收测试报告](docs/验收测试报告.md)，需求追踪见 [SPEC 索引](docs/specs/README.md)。
+
+## 运维
+
+`docker compose down` 只停止服务并保留数据。备份和恢复：
+
+```bash
+./scripts/backup.sh
+./scripts/restore.sh backups/YYYYMMDD-HHMMSS
+```
+
+危险重置会先列出精确卷范围，且必须明确确认：
+
+```bash
+CONFIRM=YES ./scripts/reset.sh
+```
+
+Windows 对应脚本均位于 `scripts/*.ps1`。
+
+## 仓库结构
+
+```text
+backend/        Go API、领域模型、Provider 与编排器
+frontend/       Vue 3 管理端
+deploy/         服务镜像与边车
+docs/specs/     SPEC 与验收准则
+docs/site/      GitHub Pages 产品站
+scripts/        启动、诊断、测试、备份恢复
+compose.yaml    完整默认栈
+```
+
+## 许可证
+
+本项目使用 MIT License。第三方组件及其许可证见 `THIRD_PARTY_NOTICES.md`。

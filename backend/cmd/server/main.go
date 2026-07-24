@@ -14,6 +14,7 @@ import (
 	"github.com/lohasle/nimbus-framework-go/internal/modules/member"
 	"github.com/lohasle/nimbus-framework-go/internal/modules/pay"
 	"github.com/lohasle/nimbus-framework-go/internal/modules/system"
+	"github.com/lohasle/nimbus-framework-go/internal/modules/visionai"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/config"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/database"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/router"
@@ -45,6 +46,9 @@ func main() {
 		err = pay.Migrate(db)
 	}
 	if err == nil {
+		err = visionai.Migrate(db)
+	}
+	if err == nil {
 		err = infra.Seed(db, tenant.ID)
 	}
 	if err == nil {
@@ -61,6 +65,7 @@ func main() {
 	engine := router.New(system.NewHandler(service), db)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go visionai.RunOutboxPublisher(ctx, db, cfg)
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           engine,

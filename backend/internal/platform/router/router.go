@@ -12,6 +12,7 @@ import (
 	"github.com/lohasle/nimbus-framework-go/internal/modules/member"
 	"github.com/lohasle/nimbus-framework-go/internal/modules/pay"
 	"github.com/lohasle/nimbus-framework-go/internal/modules/system"
+	"github.com/lohasle/nimbus-framework-go/internal/modules/visionai"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/httpx"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/middleware"
 	swaggerFiles "github.com/swaggo/files"
@@ -223,6 +224,7 @@ func New(handler *system.Handler, db *gorm.DB) *gin.Engine {
 	infra.Register(admin, db, handler.Auth())
 	member.Register(admin, db, handler.Auth())
 	pay.Register(admin, db, handler.Auth())
+	visionai.Register(admin, db, handler.Auth())
 	for _, module := range []string{
 		system.ModuleName,
 		infra.ModuleName,
@@ -231,6 +233,7 @@ func New(handler *system.Handler, db *gorm.DB) *gin.Engine {
 		application.ModuleName,
 		im.ModuleName,
 		appmodule.ModuleName,
+		visionai.ModuleName,
 	} {
 		admin.GET("/"+module+"/health", health(module))
 	}

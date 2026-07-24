@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Backend tests
+        working-directory: backend
+        run: go test ./...
+      - name: Frontend install
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Frontend typecheck
+        working-directory: frontend
+        run: pnpm ts:check
+      - name: Frontend production build
+        working-directory: frontend
+        run: pnpm build:prod
+      - name: Compose validation
+        run: |
+          docker compose config --quiet
+          docker compose -f compose.yaml -f compose.linux.yaml config --quiet
+          docker compose -f compose.yaml -f compose.gpu.yaml --profile inference-gpu --profile gpu-worker config --quiet

@@ -1,0 +1,10 @@
+services:
+  backend:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  orchestrator:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+# Docker Desktop + WSL2:
+# docker compose -f compose.yaml -f compose.windows.yaml up -d --build --wait

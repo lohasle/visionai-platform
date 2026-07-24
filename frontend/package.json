@@ -4,6 +4,7 @@
   "description": "Nimbus Framework运营后台",
   "author": "Nimbus Platform Team",
   "private": true,
+  "packageManager": "pnpm@11.9.0",
   "scripts": {
     "i": "pnpm install",
     "dev": "vite --mode env.local",

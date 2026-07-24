@@ -1,20 +1,11 @@
-# Nimbus Framework Go 文档
+# VisionAI 文档中心
 
-## 阅读顺序
+- [产品手册](产品手册.md)：安装、角色、完整业务流程、API、运维和故障排查。
+- [验收测试报告](验收测试报告.md)：自动化门禁、真实黄金路径、跨平台用例和截图索引。
+- [架构](architecture.md)：运行拓扑、代码边界、一致性、不可变性和安全。
+- [SPEC 索引](specs/README.md)：设计需求到 Linear issue 和实现证据的追踪。
+- [ADR](adr/)：脚手架、数据库、Provider 和部署等关键技术决策。
+- [发布说明](发布说明.md)：版本内容、升级和回退要求。
+- [GitHub Pages 源码](site/index.html)：公开产品介绍站点。
 
-1. [项目 README](../README.md)
-2. [Agent 上下文](agent-context.md)
-3. [架构说明](architecture.md)
-4. [开发规范](development-standards.md)
-5. [测试策略](testing-strategy.md)
-6. [SPEC 索引](specs/README.md)
-
-## 目录约定
-
-- `docs/`：人工维护的架构、开发、测试与 SPEC 文档。
-- `backend/docs/`：Swagger 自动生成物，不放人工文档。
-- `.rule/`：跨迭代稳定规则。
-- `.agents/skills/`：仅存放 Nimbus 特有的可复用工作指引。
-- `scripts/`：本地初始化、启动和验收脚本。
-
-文档必须描述仓库当前真实能力。未开放菜单或未实现的 Java 扩展能力不得标记为已完成。
+设计基线为 `VisionAI企业级计算机视觉算法平台产品设计说明书_V1.3_WindowsGPU_Linux部署版.docx`。原始文档保留在仓库外部，开发过程未修改该文件。
