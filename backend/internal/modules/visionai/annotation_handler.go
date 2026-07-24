@@ -74,17 +74,6 @@ func jsonValue(value any) string {
 	return string(data)
 }
 
-func memberHasRole(member ProjectMember, role string) bool {
-	var roles []string
-	_ = json.Unmarshal([]byte(member.Roles), &roles)
-	for _, current := range roles {
-		if current == role {
-			return true
-		}
-	}
-	return false
-}
-
 func (h *Handler) validateAnnotationUsers(project Project, userIDs []uint64, role string) error {
 	if len(userIDs) == 0 {
 		return errors.New("至少选择一名人员")
@@ -103,8 +92,8 @@ func (h *Handler) validateAnnotationUsers(project Project, userIDs []uint64, rol
 		if h.db.Where("tenant_id = ? AND project_id = ? AND user_id = ?", project.TenantID, project.ID, userID).First(&member).Error != nil {
 			return fmt.Errorf("用户 %d 不是项目成员", userID)
 		}
-		if userID != project.OwnerUserID && !memberHasRole(member, role) {
-			return fmt.Errorf("用户 %d 缺少项目角色 %s", userID, role)
+		if userID != project.OwnerUserID && !h.userHasSystemRole(project.TenantID, userID, role) {
+			return fmt.Errorf("用户 %d 缺少系统角色 %s", userID, role)
 		}
 	}
 	return nil

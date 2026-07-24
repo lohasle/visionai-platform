@@ -150,16 +150,34 @@
               >
             </dl>
           </el-tab-pane>
-          <el-tab-pane label="成员与角色" name="members">
+          <el-tab-pane label="项目成员" name="members">
             <div class="tab-header">
-              <p>角色变更由后端即时鉴权。</p>
-              <el-button type="primary" plain @click="memberVisible = true">添加成员</el-button>
+              <div>
+                <p>项目只维护成员范围，权限实时继承系统角色。</p>
+                <el-button link type="primary" @click="router.push('/system/role')">
+                  前往系统角色管理
+                </el-button>
+              </div>
+              <el-button type="primary" plain @click="openMemberDialog">添加成员</el-button>
             </div>
             <el-table :data="members" v-loading="tabLoading">
-              <el-table-column prop="userId" label="用户 ID" width="110" />
-              <el-table-column label="项目角色">
+              <el-table-column label="成员" min-width="180">
                 <template #default="{ row }">
-                  <el-tag v-for="role in row.roles" :key="role" class="role-tag">{{ role }}</el-tag>
+                  <strong>{{ row.nickname || row.username }}</strong>
+                  <small class="member-account">{{ row.username }} · #{{ row.userId }}</small>
+                </template>
+              </el-table-column>
+              <el-table-column label="系统角色" min-width="220">
+                <template #default="{ row }">
+                  <el-tag
+                    v-for="role in row.roles"
+                    :key="role.id"
+                    class="role-tag"
+                    :type="role.status === 0 ? 'primary' : 'info'"
+                  >
+                    {{ role.name }}
+                  </el-tag>
+                  <span v-if="!row.roles.length" class="empty-role">未分配系统角色</span>
                 </template>
               </el-table-column>
               <el-table-column width="90" align="right">
@@ -202,14 +220,27 @@
       </template>
     </el-drawer>
 
-    <el-dialog v-model="memberVisible" title="添加或更新成员" width="520">
+    <el-dialog v-model="memberVisible" title="添加项目成员" width="520">
+      <el-alert
+        title="角色请在“系统管理 → 用户管理 → 分配角色”中统一设置"
+        type="info"
+        :closable="false"
+        show-icon
+      />
       <el-form label-position="top">
-        <el-form-item label="租户用户 ID" required>
-          <el-input-number v-model="memberForm.userId" :min="1" controls-position="right" />
-        </el-form-item>
-        <el-form-item label="项目角色" required>
-          <el-select v-model="memberForm.roles" multiple class="full-width">
-            <el-option v-for="role in roleOptions" :key="role" :label="role" :value="role" />
+        <el-form-item label="租户用户" required class="member-user-field">
+          <el-select
+            v-model="memberForm.userId"
+            filterable
+            class="full-width"
+            placeholder="选择系统用户"
+          >
+            <el-option
+              v-for="user in availableMemberUsers"
+              :key="user.id"
+              :label="`${user.nickname || user.username} · ${user.username}`"
+              :value="user.id"
+            />
           </el-select>
         </el-form-item>
       </el-form>
@@ -237,10 +268,12 @@ import {
   type ProjectMember,
   type ProjectStatus
 } from '@/api/ai-platform/projects'
+import { getSimpleUserList, type UserVO } from '@/api/system/user'
 
 defineOptions({ name: 'VisionAIProjects' })
 
 const message = useMessage()
+const router = useRouter()
 const statusOptions = [
   { label: '草稿', value: 'DRAFT' },
   { label: '运行中', value: 'ACTIVE' },
@@ -253,18 +286,10 @@ const statusMeta: Record<ProjectStatus, { label: string; type: 'info' | 'success
   SUSPENDED: { label: '已暂停', type: 'warning' },
   ARCHIVED: { label: '已归档', type: 'info' }
 }
-const roleOptions = [
-  'DATA_MANAGER',
-  'ANNOTATOR',
-  'REVIEWER',
-  'ALGORITHM_ENGINEER',
-  'APPROVER',
-  'OPS',
-  'AUDITOR'
-]
 const query = reactive({ pageNo: 1, pageSize: 12, keyword: '', status: '' })
 const projects = ref<Project[]>([])
 const members = ref<ProjectMember[]>([])
+const users = ref<UserVO[]>([])
 const total = ref(0)
 const loading = ref(false)
 const tabLoading = ref(false)
@@ -277,7 +302,11 @@ const selected = ref<Project>()
 const cloneSource = ref<Project>()
 const activeTab = ref('overview')
 const projectForm = reactive({ code: '', name: '', description: '' })
-const memberForm = reactive<{ userId: number; roles: string[] }>({ userId: 1, roles: [] })
+const memberForm = reactive<{ userId?: number }>({ userId: undefined })
+const availableMemberUsers = computed(() => {
+  const existing = new Set(members.value.map((member) => member.userId))
+  return users.value.filter((user) => user.status === 0 && !existing.has(user.id))
+})
 const configForm = reactive({
   storageEndpoint: '',
   bucket: '',
@@ -369,17 +398,22 @@ const loadTab = async (name: string | number) => {
   }
 }
 
+const openMemberDialog = () => {
+  memberForm.userId = availableMemberUsers.value[0]?.id
+  memberVisible.value = true
+}
+
 const saveMember = async () => {
-  if (!selected.value || !memberForm.roles.length) {
-    message.warning('请选择至少一个项目角色')
+  if (!selected.value || !memberForm.userId) {
+    message.warning('请选择项目成员')
     return
   }
   saving.value = true
   try {
-    await upsertProjectMember(selected.value.id, memberForm)
+    await upsertProjectMember(selected.value.id, { userId: memberForm.userId })
     memberVisible.value = false
     await loadTab('members')
-    message.success('成员角色已生效')
+    message.success('项目成员已添加，权限继承系统角色')
   } finally {
     saving.value = false
   }
@@ -407,7 +441,10 @@ const saveConfig = async () => {
   }
 }
 
-onMounted(loadProjects)
+onMounted(async () => {
+  const [, systemUsers] = await Promise.all([loadProjects(), getSimpleUserList()])
+  users.value = systemUsers
+})
 </script>
 
 <style scoped lang="scss">
@@ -546,6 +583,21 @@ onMounted(loadProjects)
   background: var(--primary-soft);
   border-radius: var(--radius-md);
   place-items: center;
+}
+
+.member-account {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-tertiary);
+}
+
+.empty-role {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.member-user-field {
+  margin-top: var(--space-4);
 }
 
 .empty-card {

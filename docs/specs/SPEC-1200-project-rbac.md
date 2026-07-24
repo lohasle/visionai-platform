@@ -24,3 +24,5 @@ Linear：LOH-7
 - Project、ProjectMember、ProjectConfig 全部强制 tenant/project 查询范围，后端执行成员授权。
 - 已实现创建、配置、成员多角色、状态、归档和安全克隆；克隆仅复制非敏感配置。
 - 非成员访问、归档只读、角色变化和审计均有后端契约测试与运行验收。
+
+> 角色来源已由 [SPEC-2240](SPEC-2240-system-role-project-authorization.md) 收敛为系统角色管理。项目成员不再保存独立角色，本文中的“项目角色”均指项目成员当前拥有的系统角色。

@@ -1,8 +1,12 @@
 package visionai
 
 import (
+	"encoding/json"
+
 	"github.com/gin-gonic/gin"
+	"github.com/lohasle/nimbus-framework-go/internal/modules/system"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func Migrate(db *gorm.DB) error {
@@ -26,10 +30,45 @@ func Migrate(db *gorm.DB) error {
 	); err != nil {
 		return err
 	}
+	if err := system.EnsureVisionAIRoles(db); err != nil {
+		return err
+	}
+	if err := migrateLegacyProjectRoles(db); err != nil {
+		return err
+	}
 	if db.Migrator().HasIndex(&ModelArtifact{}, "uk_model_artifact") {
 		return db.Migrator().DropIndex(&ModelArtifact{}, "uk_model_artifact")
 	}
 	return nil
+}
+
+func migrateLegacyProjectRoles(db *gorm.DB) error {
+	var members []ProjectMember
+	if err := db.Where("roles IS NOT NULL AND JSON_LENGTH(roles) > 0").Find(&members).Error; err != nil {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, member := range members {
+			var codes []string
+			if json.Unmarshal([]byte(member.LegacyRoles), &codes) != nil {
+				continue
+			}
+			for _, code := range codes {
+				var role system.Role
+				if err := tx.Where("tenant_id = ? AND code = ?", member.TenantID, code).First(&role).Error; err != nil {
+					continue
+				}
+				assignment := system.UserRole{UserID: member.UserID, RoleID: role.ID}
+				if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&assignment).Error; err != nil {
+					return err
+				}
+			}
+			if err := tx.Model(&member).Update("roles", "[]").Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func Register(group *gin.RouterGroup, db *gorm.DB, auth gin.HandlerFunc) {

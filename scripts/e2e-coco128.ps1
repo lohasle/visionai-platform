@@ -151,6 +151,19 @@ if ([int]$reviewerPage.total -eq 0) {
         password = $ReviewerPassword
     } | Out-Null
 }
+$systemRoles = @(Invoke-VisionAI -Method Get -Path "/system/role/simple-list")
+$reviewerRoleIds = @(
+    $systemRoles |
+        Where-Object { $_.code -in @("REVIEWER", "APPROVER", "AUDITOR") } |
+        ForEach-Object { [int64]$_.id }
+)
+if ($reviewerRoleIds.Count -ne 3) {
+    throw "VisionAI system roles are incomplete; expected REVIEWER, APPROVER and AUDITOR"
+}
+Invoke-VisionAI -Method Post -Path "/system/permission/assign-user-role" -Body @{
+    userId = $reviewerId
+    roleIds = $reviewerRoleIds
+} | Out-Null
 
 Write-Step "Creating the COCO128 acceptance project"
 $project = Invoke-VisionAI -Method Post -Path "/ai-platform/projects" -Body @{
@@ -162,7 +175,6 @@ $projectId = [int64]$project.id
 Invoke-VisionAI -Method Put -Path "/ai-platform/projects/$projectId/status" -Body @{ status = "ACTIVE" } | Out-Null
 Invoke-VisionAI -Method Put -Path "/ai-platform/projects/$projectId/members" -Body @{
     userId = $reviewerId
-    roles = @("REVIEWER", "APPROVER", "AUDITOR")
 } | Out-Null
 Invoke-VisionAI -Method Put -Path "/ai-platform/cvat-user-mappings" -Body @{
     platformUserId = 1

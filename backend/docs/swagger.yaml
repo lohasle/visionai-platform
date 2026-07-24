@@ -673,6 +673,11 @@ definitions:
     - password
     - username
     type: object
+  internal_modules_visionai.memberRequest:
+    properties:
+      userId:
+        type: integer
+    type: object
 info:
   contact: {}
   description: 'Go modular-monolith scaffold for operations platforms. Default database:
@@ -1432,6 +1437,13 @@ paths:
       tags:
       - VisionAI Project
     put:
+      parameters:
+      - description: Project member
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_modules_visionai.memberRequest'
       responses:
         "200":
           description: OK
@@ -1439,7 +1451,7 @@ paths:
             $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
       security:
       - BearerAuth: []
-      summary: Add or update project member roles
+      summary: Add a project member whose roles are managed by System Management
       tags:
       - VisionAI Project
   /ai-platform/projects/{projectId}/members/{userId}:

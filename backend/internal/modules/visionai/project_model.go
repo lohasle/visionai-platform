@@ -26,14 +26,14 @@ type Project struct {
 }
 
 type ProjectMember struct {
-	ID        uint64    `gorm:"primaryKey" json:"id"`
-	TenantID  uint64    `gorm:"index;uniqueIndex:uk_project_user;not null" json:"tenantId"`
-	ProjectID uint64    `gorm:"index;uniqueIndex:uk_project_user;not null" json:"projectId"`
-	UserID    uint64    `gorm:"index;uniqueIndex:uk_project_user;not null" json:"userId"`
-	Roles     string    `gorm:"type:json;not null" json:"-"`
-	CreatedBy uint64    `gorm:"not null" json:"createdBy"`
-	CreatedAt time.Time `json:"createTime"`
-	UpdatedAt time.Time `json:"updateTime"`
+	ID          uint64    `gorm:"primaryKey" json:"id"`
+	TenantID    uint64    `gorm:"index;uniqueIndex:uk_project_user;not null" json:"tenantId"`
+	ProjectID   uint64    `gorm:"index;uniqueIndex:uk_project_user;not null" json:"projectId"`
+	UserID      uint64    `gorm:"index;uniqueIndex:uk_project_user;not null" json:"userId"`
+	LegacyRoles string    `gorm:"column:roles;type:json;not null" json:"-"`
+	CreatedBy   uint64    `gorm:"not null" json:"createdBy"`
+	CreatedAt   time.Time `json:"createTime"`
+	UpdatedAt   time.Time `json:"updateTime"`
 }
 
 type ProjectConfig struct {

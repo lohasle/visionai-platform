@@ -14,12 +14,6 @@ import (
 	"gorm.io/gorm"
 )
 
-var projectRoles = map[string]bool{
-	"PROJECT_OWNER": true, "DATA_MANAGER": true, "ANNOTATOR": true,
-	"REVIEWER": true, "ALGORITHM_ENGINEER": true, "APPROVER": true,
-	"OPS": true, "AUDITOR": true,
-}
-
 type projectRequest struct {
 	Code        string `json:"code"`
 	Name        string `json:"name"`
@@ -27,8 +21,7 @@ type projectRequest struct {
 }
 
 type memberRequest struct {
-	UserID uint64   `json:"userId"`
-	Roles  []string `json:"roles"`
+	UserID uint64 `json:"userId"`
 }
 
 type configRequest struct {
@@ -80,17 +73,52 @@ func (h *Handler) requireProjectRole(c *gin.Context, project Project, allowed ..
 		httpx.Fail(c, http.StatusForbidden, 403, "无权执行该项目操作")
 		return false
 	}
-	var roles []string
-	_ = json.Unmarshal([]byte(member.Roles), &roles)
-	for _, role := range roles {
-		for _, candidate := range allowed {
-			if role == candidate {
-				return true
-			}
-		}
+	if h.userHasSystemRole(project.TenantID, member.UserID, allowed...) {
+		return true
 	}
 	httpx.Fail(c, http.StatusForbidden, 403, "当前项目角色无权执行该操作")
 	return false
+}
+
+func normalizedRoleCodes(codes []string) []string {
+	result := make([]string, 0, len(codes))
+	seen := make(map[string]struct{}, len(codes))
+	for _, code := range codes {
+		code = strings.ToUpper(strings.TrimSpace(code))
+		if code == "" {
+			continue
+		}
+		if _, exists := seen[code]; exists {
+			continue
+		}
+		seen[code] = struct{}{}
+		result = append(result, code)
+	}
+	return result
+}
+
+func (h *Handler) userHasSystemRole(tenantID, userID uint64, allowed ...string) bool {
+	codes := normalizedRoleCodes(allowed)
+	if len(codes) == 0 {
+		return false
+	}
+	var count int64
+	h.db.Table("roles AS r").
+		Joins("JOIN user_roles AS ur ON ur.role_id = r.id").
+		Where("r.tenant_id = ? AND ur.user_id = ? AND r.status = ? AND UPPER(r.code) IN ?", tenantID, userID, 0, codes).
+		Count(&count)
+	return count > 0
+}
+
+func (h *Handler) systemRolesForUser(tenantID, userID uint64) []system.Role {
+	roles := make([]system.Role, 0)
+	h.db.Table("roles AS r").
+		Select("r.*").
+		Joins("JOIN user_roles AS ur ON ur.role_id = r.id").
+		Where("r.tenant_id = ? AND ur.user_id = ?", tenantID, userID).
+		Order("r.sort,r.id").
+		Find(&roles)
+	return roles
 }
 
 // ProjectPage godoc
@@ -138,8 +166,7 @@ func (h *Handler) ProjectCreate(c *gin.Context) {
 		if err := tx.Create(&project).Error; err != nil {
 			return err
 		}
-		roles, _ := json.Marshal([]string{"PROJECT_OWNER"})
-		if err := tx.Create(&ProjectMember{TenantID: project.TenantID, ProjectID: project.ID, UserID: project.OwnerUserID, Roles: string(roles), CreatedBy: project.CreatedBy}).Error; err != nil {
+		if err := tx.Create(&ProjectMember{TenantID: project.TenantID, ProjectID: project.ID, UserID: project.OwnerUserID, LegacyRoles: "[]", CreatedBy: project.CreatedBy}).Error; err != nil {
 			return err
 		}
 		if err := tx.Create(&ProjectConfig{TenantID: project.TenantID, ProjectID: project.ID, StorageConfig: "{}", ProviderConfig: "{}", SecretRefs: "{}"}).Error; err != nil {
@@ -305,8 +332,7 @@ func (h *Handler) ProjectClone(c *gin.Context) {
 		if err := tx.Create(&clone).Error; err != nil {
 			return err
 		}
-		roles, _ := json.Marshal([]string{"PROJECT_OWNER"})
-		if err := tx.Create(&ProjectMember{TenantID: clone.TenantID, ProjectID: clone.ID, UserID: clone.OwnerUserID, Roles: string(roles), CreatedBy: clone.CreatedBy}).Error; err != nil {
+		if err := tx.Create(&ProjectMember{TenantID: clone.TenantID, ProjectID: clone.ID, UserID: clone.OwnerUserID, LegacyRoles: "[]", CreatedBy: clone.CreatedBy}).Error; err != nil {
 			return err
 		}
 		if err := tx.Create(&ProjectConfig{TenantID: clone.TenantID, ProjectID: clone.ID, StorageConfig: sourceConfig.StorageConfig, ProviderConfig: sourceConfig.ProviderConfig, SecretRefs: "{}"}).Error; err != nil {
@@ -335,29 +361,22 @@ func (h *Handler) ProjectMemberList(c *gin.Context) {
 	h.db.Where("tenant_id = ? AND project_id = ?", tenantID(c), projectID(c)).Order("id").Find(&rows)
 	result := make([]gin.H, 0, len(rows))
 	for _, row := range rows {
-		var roles []string
-		_ = json.Unmarshal([]byte(row.Roles), &roles)
-		result = append(result, gin.H{"id": row.ID, "userId": row.UserID, "roles": roles, "createTime": row.CreatedAt})
+		var user system.AdminUser
+		h.db.Where("tenant_id = ? AND id = ?", row.TenantID, row.UserID).First(&user)
+		roles := h.systemRolesForUser(row.TenantID, row.UserID)
+		result = append(result, gin.H{
+			"id": row.ID, "userId": row.UserID, "username": user.Username, "nickname": user.Nickname,
+			"userStatus": user.Status, "roles": roles, "createTime": row.CreatedAt,
+		})
 	}
 	httpx.OK(c, result)
 }
 
-func validRoles(roles []string) bool {
-	if len(roles) == 0 {
-		return false
-	}
-	for _, role := range roles {
-		if !projectRoles[role] {
-			return false
-		}
-	}
-	return true
-}
-
 // ProjectMemberUpsert godoc
-// @Summary Add or update project member roles
+// @Summary Add a project member whose roles are managed by System Management
 // @Tags VisionAI Project
 // @Security BearerAuth
+// @Param request body memberRequest true "Project member"
 // @Success 200 {object} httpx.Response
 // @Router /ai-platform/projects/{projectId}/members [put]
 func (h *Handler) ProjectMemberUpsert(c *gin.Context) {
@@ -369,26 +388,24 @@ func (h *Handler) ProjectMemberUpsert(c *gin.Context) {
 		return
 	}
 	var req memberRequest
-	if c.ShouldBindJSON(&req) != nil || req.UserID == 0 || !validRoles(req.Roles) {
-		httpx.Fail(c, 400, 400, "用户和有效角色必填")
+	if c.ShouldBindJSON(&req) != nil || req.UserID == 0 {
+		httpx.Fail(c, 400, 400, "项目成员用户必填")
 		return
 	}
-	if h.db.Where("tenant_id = ? AND id = ?", tenantID(c), req.UserID).First(&system.AdminUser{}).Error != nil {
-		httpx.Fail(c, 400, 400, "成员用户不属于当前租户")
+	if h.db.Where("tenant_id = ? AND id = ? AND status = ?", tenantID(c), req.UserID, 0).First(&system.AdminUser{}).Error != nil {
+		httpx.Fail(c, 400, 400, "成员用户不属于当前租户或已停用")
 		return
 	}
-	roles, _ := json.Marshal(req.Roles)
 	row := ProjectMember{TenantID: tenantID(c), ProjectID: projectID(c), UserID: req.UserID}
 	err := h.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("tenant_id = ? AND project_id = ? AND user_id = ?", row.TenantID, row.ProjectID, row.UserID).
-			Attrs(ProjectMember{Roles: string(roles), CreatedBy: c.GetUint64("user_id")}).
+			Attrs(ProjectMember{LegacyRoles: "[]", CreatedBy: c.GetUint64("user_id")}).
 			FirstOrCreate(&row).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&row).Update("roles", string(roles)).Error; err != nil {
-			return err
-		}
-		return appendAudit(tx, c, project.ID, "PROJECT_MEMBER_UPSERTED", "PROJECT_MEMBER", req.UserID, nil, gin.H{"userId": req.UserID, "roles": req.Roles})
+		return appendAudit(tx, c, project.ID, "PROJECT_MEMBER_UPSERTED", "PROJECT_MEMBER", req.UserID, nil, gin.H{
+			"userId": req.UserID, "roleSource": "SYSTEM_MANAGEMENT",
+		})
 	})
 	if err != nil {
 		httpx.Fail(c, 500, 500, "成员保存失败")

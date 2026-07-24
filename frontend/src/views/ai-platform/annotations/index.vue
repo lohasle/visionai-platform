@@ -341,14 +341,14 @@ const annotatorOptions = computed(() =>
   projectUsers.value.filter(
     (user) =>
       user.id === projects.value.find((project) => project.id === projectId.value)?.ownerUserId ||
-      memberByUser.value.get(user.id)?.roles.includes('ANNOTATOR')
+      memberByUser.value.get(user.id)?.roles.some((role) => role.code === 'ANNOTATOR')
   )
 )
 const reviewerOptions = computed(() =>
   projectUsers.value.filter(
     (user) =>
       user.id === projects.value.find((project) => project.id === projectId.value)?.ownerUserId ||
-      memberByUser.value.get(user.id)?.roles.includes('REVIEWER')
+      memberByUser.value.get(user.id)?.roles.some((role) => role.code === 'REVIEWER')
   )
 )
 const userLabel = (userId: number) => {

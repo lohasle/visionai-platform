@@ -19,6 +19,49 @@ type menuSeed struct {
 	Permissions   []string
 }
 
+type VisionAIRoleDefinition struct {
+	Name string
+	Code string
+	Sort int
+}
+
+var VisionAIRoleDefinitions = []VisionAIRoleDefinition{
+	{Name: "项目负责人", Code: "PROJECT_OWNER", Sort: 100},
+	{Name: "数据管理员", Code: "DATA_MANAGER", Sort: 110},
+	{Name: "标注员", Code: "ANNOTATOR", Sort: 120},
+	{Name: "审核员", Code: "REVIEWER", Sort: 130},
+	{Name: "算法工程师", Code: "ALGORITHM_ENGINEER", Sort: 140},
+	{Name: "模型审批人", Code: "APPROVER", Sort: 150},
+	{Name: "平台运维", Code: "OPS", Sort: 160},
+	{Name: "审计员", Code: "AUDITOR", Sort: 170},
+}
+
+func ensureVisionAIRolesForTenant(db *gorm.DB, tenantID uint64) error {
+	for _, definition := range VisionAIRoleDefinitions {
+		role := Role{TenantID: tenantID, Code: definition.Code}
+		if err := db.Where("tenant_id = ? AND code = ?", tenantID, definition.Code).Attrs(Role{
+			Name: definition.Name, Sort: definition.Sort, Status: 0, Type: 1, DataScope: 1,
+			DataScopeDeptIDs: "[]", Remark: "VisionAI 内置业务角色，在系统管理中统一分配",
+		}).FirstOrCreate(&role).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func EnsureVisionAIRoles(db *gorm.DB) error {
+	var tenantIDs []uint64
+	if err := db.Model(&Tenant{}).Order("id").Pluck("id", &tenantIDs).Error; err != nil {
+		return err
+	}
+	for _, tenantID := range tenantIDs {
+		if err := ensureVisionAIRolesForTenant(db, tenantID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func SeedBase(db *gorm.DB) error {
 	groups := []SystemMenu{
 		{ID: 1, Name: "系统管理", Type: 1, Sort: 10, ParentID: 0, Path: "/system", Icon: "ep:tools", Status: 0, Visible: true, KeepAlive: true, AlwaysShow: true},
@@ -107,7 +150,10 @@ func SeedBase(db *gorm.DB) error {
 	if err := db.Where("name = ?", pack.Name).Assign(pack).FirstOrCreate(&pack).Error; err != nil {
 		return err
 	}
-	return db.Model(&Tenant{}).Where("package_id = 0").Update("package_id", pack.ID).Error
+	if err := db.Model(&Tenant{}).Where("package_id = 0").Update("package_id", pack.ID).Error; err != nil {
+		return err
+	}
+	return EnsureVisionAIRoles(db)
 }
 
 func deleteMenuTrees(db *gorm.DB, roots []uint64) error {

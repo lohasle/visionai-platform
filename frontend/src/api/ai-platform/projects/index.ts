@@ -16,8 +16,18 @@ export interface Project {
 export interface ProjectMember {
   id: number
   userId: number
-  roles: string[]
+  username: string
+  nickname: string
+  userStatus: number
+  roles: ProjectMemberRole[]
   createTime: string
+}
+
+export interface ProjectMemberRole {
+  id: number
+  name: string
+  code: string
+  status: number
 }
 
 export interface ProjectConfig {
@@ -50,7 +60,7 @@ export const cloneProject = (id: number, data: Pick<Project, 'code' | 'name' | '
 export const getProjectMembers = (id: number) =>
   request.get<ProjectMember[]>({ url: `/ai-platform/projects/${id}/members` })
 
-export const upsertProjectMember = (id: number, data: { userId: number; roles: string[] }) =>
+export const upsertProjectMember = (id: number, data: { userId: number }) =>
   request.put({ url: `/ai-platform/projects/${id}/members`, data })
 
 export const removeProjectMember = (id: number, userId: number) =>

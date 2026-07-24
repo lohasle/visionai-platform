@@ -1324,7 +1324,18 @@ const docTemplate = `{
                 "tags": [
                     "VisionAI Project"
                 ],
-                "summary": "Add or update project member roles",
+                "summary": "Add a project member whose roles are managed by System Management",
+                "parameters": [
+                    {
+                        "description": "Project member",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_modules_visionai.memberRequest"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -8746,6 +8757,14 @@ const docTemplate = `{
                 },
                 "username": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_modules_visionai.memberRequest": {
+            "type": "object",
+            "properties": {
+                "userId": {
+                    "type": "integer"
                 }
             }
         }
