@@ -251,7 +251,13 @@ services:
     environment:
       FIFTYONE_MEDIA_ENDPOINT: host.docker.internal:29000
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5152/health', timeout=3)"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5151', timeout=3); urllib.request.urlopen('http://127.0.0.1:5152/health', timeout=3)",
+        ]
       interval: 10s
       timeout: 5s
       retries: 30

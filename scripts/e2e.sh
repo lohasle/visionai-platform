@@ -1,7 +1,12 @@
 #!/usr/bin/env sh
 set -eu
 base="${VISIONAI_BASE_URL:-http://localhost:58080}"
+fiftyone_ui="${VISIONAI_FIFTYONE_UI_URL:-http://localhost:25151}"
+fiftyone_api="${VISIONAI_FIFTYONE_API_URL:-http://localhost:25152}"
 curl -fsS "$base/health" >/dev/null
+curl -fsS "$fiftyone_ui/" >/dev/null
+fiftyone_health="$(curl -fsS "$fiftyone_api/health")"
+printf '%s' "$fiftyone_health" | jq -e '.status == "UP" and .uiStatus == "UP"' >/dev/null
 login="$(curl -fsS -H 'Content-Type: application/json' -H 'tenant-id: 1' -d '{"username":"admin","password":"admin123"}' "$base/admin-api/system/auth/login")"
 token="$(printf '%s' "$login" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')"
 [ -n "$token" ]
@@ -15,4 +20,4 @@ for path in \
 do
   curl -fsS -H "Authorization: Bearer $token" "$base/admin-api/ai-platform/$path" >/dev/null
 done
-echo "VisionAI smoke: health, auth and core read surfaces passed."
+echo "VisionAI smoke: health, FiftyOne UI, auth and core read surfaces passed."
