@@ -12,7 +12,9 @@
       <header class="workbench-header">
         <div class="workbench-identity">
           <span class="provider-mark" :class="provider.toLowerCase()">
-            <Icon :icon="provider === 'CVAT' ? 'lucide:scan-line' : 'lucide:gallery-vertical-end'" />
+            <Icon
+              :icon="provider === 'CVAT' ? 'lucide:scan-line' : 'lucide:gallery-vertical-end'"
+            />
           </span>
           <div>
             <div class="title-line">
@@ -39,8 +41,8 @@
     <section class="workbench-shell">
       <div v-if="loading" class="workbench-state">
         <Icon icon="lucide:loader-circle" :size="28" class="spinner" />
-        <strong>正在连接 {{ provider }} 工作台</strong>
-        <span>首次加载外部工作台可能需要几秒钟。</span>
+        <strong>正在建立 {{ provider }} 个人会话</strong>
+        <span>平台正在校验当前账号与任务权限，首次加载可能需要几秒钟。</span>
       </div>
       <div v-if="loadFailed" class="workbench-state failed">
         <Icon icon="lucide:shield-alert" :size="30" />
@@ -59,7 +61,7 @@
         allow="clipboard-read; clipboard-write; fullscreen"
         referrerpolicy="same-origin"
         @load="handleLoad"
-      />
+      ></iframe>
     </section>
   </el-dialog>
 </template>
@@ -77,13 +79,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'update:modelValue', value: boolean): void
+  (event: 'refresh'): void
+  (event: 'open-external'): void
 }>()
 
 const loading = ref(true)
 const loadFailed = ref(false)
-const reloadIndex = ref(0)
 let loadTimer: ReturnType<typeof setTimeout> | undefined
-const frameKey = computed(() => `${props.url}-${reloadIndex.value}`)
+const frameKey = computed(() => props.url)
 
 const clearLoadTimer = () => {
   if (loadTimer) clearTimeout(loadTimer)
@@ -106,12 +109,12 @@ const handleLoad = () => {
 }
 
 const reload = () => {
-  reloadIndex.value += 1
   beginLoad()
+  emit('refresh')
 }
 
 const openExternal = () => {
-  if (props.url) window.open(props.url, '_blank', 'noopener,noreferrer')
+  if (props.url) emit('open-external')
 }
 
 const close = () => emit('update:modelValue', false)
@@ -149,15 +152,15 @@ onBeforeUnmount(clearLoadTimer)
 }
 
 .workbench-header {
+  display: flex;
   min-height: 72px;
   padding: 12px 18px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
   color: #e5edf8;
   background: linear-gradient(110deg, #111c31, #17243b);
   border-bottom: 1px solid rgb(148 163 184 / 22%);
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
 }
 
 .workbench-identity,
@@ -178,15 +181,15 @@ onBeforeUnmount(clearLoadTimer)
 }
 
 .provider-mark {
+  display: grid;
   width: 42px;
   height: 42px;
-  display: grid;
+  color: white;
+  background: #1677ff;
+  border-radius: 12px;
+  box-shadow: 0 9px 25px rgb(22 119 255 / 28%);
   place-items: center;
   flex: none;
-  color: white;
-  border-radius: 12px;
-  background: #1677ff;
-  box-shadow: 0 9px 25px rgb(22 119 255 / 28%);
 
   &.fiftyone {
     background: linear-gradient(145deg, #ff4f81, #8b5cf6);
@@ -229,9 +232,9 @@ onBeforeUnmount(clearLoadTimer)
 }
 
 .workbench-shell iframe {
+  display: block;
   width: 100%;
   height: 100%;
-  display: block;
   background: white;
   border: 0;
 }
@@ -275,7 +278,7 @@ onBeforeUnmount(clearLoadTimer)
   }
 }
 
-@media (max-width: 900px) {
+@media (width <= 900px) {
   .workbench-header {
     min-height: 0;
     padding: 10px 12px;

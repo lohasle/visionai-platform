@@ -2,12 +2,15 @@ package visionai
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/lohasle/nimbus-framework-go/internal/modules/system"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/annotation"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/config"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/httpx"
@@ -71,24 +74,83 @@ func jsonValue(value any) string {
 	return string(data)
 }
 
-func (h *Handler) requireCVATMappings(tenantID uint64, userIDs []uint64) bool {
-	if len(userIDs) == 0 {
-		return false
-	}
-	unique := make([]uint64, 0, len(userIDs))
-	seen := make(map[uint64]bool, len(userIDs))
-	for _, userID := range userIDs {
-		if userID != 0 && !seen[userID] {
-			seen[userID] = true
-			unique = append(unique, userID)
+func memberHasRole(member ProjectMember, role string) bool {
+	var roles []string
+	_ = json.Unmarshal([]byte(member.Roles), &roles)
+	for _, current := range roles {
+		if current == role {
+			return true
 		}
 	}
-	if len(unique) == 0 {
-		return false
+	return false
+}
+
+func (h *Handler) validateAnnotationUsers(project Project, userIDs []uint64, role string) error {
+	if len(userIDs) == 0 {
+		return errors.New("至少选择一名人员")
 	}
-	var count int64
-	h.db.Model(&CVATUserMapping{}).Where("tenant_id = ? AND platform_user_id IN ? AND active = ?", tenantID, unique, true).Count(&count)
-	return count == int64(len(unique))
+	seen := make(map[uint64]bool, len(userIDs))
+	for _, userID := range userIDs {
+		if userID == 0 || seen[userID] {
+			return errors.New("人员列表包含空值或重复用户")
+		}
+		seen[userID] = true
+		var user system.AdminUser
+		if h.db.Where("tenant_id = ? AND id = ? AND status = ?", project.TenantID, userID, 0).First(&user).Error != nil {
+			return fmt.Errorf("底座用户 %d 不存在或已停用", userID)
+		}
+		var member ProjectMember
+		if h.db.Where("tenant_id = ? AND project_id = ? AND user_id = ?", project.TenantID, project.ID, userID).First(&member).Error != nil {
+			return fmt.Errorf("用户 %d 不是项目成员", userID)
+		}
+		if userID != project.OwnerUserID && !memberHasRole(member, role) {
+			return fmt.Errorf("用户 %d 缺少项目角色 %s", userID, role)
+		}
+	}
+	return nil
+}
+
+func annotationTaskIncludesUser(task AnnotationTask, userID uint64) bool {
+	var annotators, reviewers []uint64
+	_ = json.Unmarshal([]byte(task.AnnotatorIDs), &annotators)
+	_ = json.Unmarshal([]byte(task.ReviewerIDs), &reviewers)
+	for _, candidate := range append(annotators, reviewers...) {
+		if candidate == userID {
+			return true
+		}
+	}
+	return false
+}
+
+func taskUsers(raw string) ([]uint64, error) {
+	var users []uint64
+	if err := json.Unmarshal([]byte(raw), &users); err != nil || len(users) == 0 {
+		return nil, errors.New("任务尚未配置人员")
+	}
+	return users, nil
+}
+
+func (h *Handler) assignCVATTaskUsers(c *gin.Context, project Project, task AnnotationTask, rawUsers string) error {
+	users, err := taskUsers(rawUsers)
+	if err != nil {
+		return err
+	}
+	identities, err := h.ensureCVATIdentities(c.Request.Context(), project.TenantID, users)
+	if err != nil {
+		return err
+	}
+	var binding ExternalResourceBinding
+	if err = h.db.Where("tenant_id = ? AND provider_type = ? AND internal_type = ? AND internal_id = ?",
+		project.TenantID, "CVAT", "ANNOTATION_TASK", task.ID).First(&binding).Error; err != nil {
+		return errors.New("CVAT Binding 尚未创建")
+	}
+	provider, err := cvatClient()
+	if err != nil {
+		return err
+	}
+	externalID, _ := strconv.ParseInt(binding.ExternalID, 10, 64)
+	_, err = provider.AssignTaskJobs(c.Request.Context(), externalID, mappingIDs(identities))
+	return err
 }
 
 // AnnotationTaskPage godoc
@@ -134,9 +196,17 @@ func (h *Handler) AnnotationTaskCreate(c *gin.Context) {
 		httpx.Fail(c, 409, 409, "标注任务只能引用已冻结资产集合")
 		return
 	}
+	if err := h.validateAnnotationUsers(project, req.AnnotatorIDs, "ANNOTATOR"); err != nil {
+		httpx.Fail(c, 409, 409, "标注员校验失败："+err.Error())
+		return
+	}
+	if err := h.validateAnnotationUsers(project, req.ReviewerIDs, "REVIEWER"); err != nil {
+		httpx.Fail(c, 409, 409, "审核员校验失败："+err.Error())
+		return
+	}
 	allUsers := append(append([]uint64{}, req.AnnotatorIDs...), req.ReviewerIDs...)
-	if !h.requireCVATMappings(project.TenantID, allUsers) {
-		httpx.Fail(c, 409, 409, "存在未映射或停用的 CVAT 用户，请先维护人员映射")
+	if _, err := h.ensureCVATIdentities(c.Request.Context(), project.TenantID, allUsers); err != nil {
+		httpx.Fail(c, 503, 503, err.Error())
 		return
 	}
 	taskType := strings.ToUpper(strings.TrimSpace(req.TaskType))
@@ -315,6 +385,18 @@ func (h *Handler) AnnotationStatusUpdate(c *gin.Context) {
 	if req.Status == AnnotationReviewing && !h.requireProjectRole(c, project, "ANNOTATOR", "REVIEWER") {
 		return
 	}
+	if req.Status == AnnotationAnnotating {
+		if err := h.assignCVATTaskUsers(c, project, task, task.AnnotatorIDs); err != nil {
+			httpx.Fail(c, 503, 503, "标注员 Job 分配失败："+err.Error())
+			return
+		}
+	}
+	if req.Status == AnnotationReviewing {
+		if err := h.assignCVATTaskUsers(c, project, task, task.ReviewerIDs); err != nil {
+			httpx.Fail(c, 503, 503, "审核员 Job 分配失败："+err.Error())
+			return
+		}
+	}
 	if err := h.db.Save(&task).Error; err != nil {
 		httpx.Fail(c, 500, 500, "状态保存失败")
 		return
@@ -357,6 +439,9 @@ func (h *Handler) AnnotationReview(c *gin.Context) {
 	task.RejectionCode, task.RejectionReason = strings.TrimSpace(req.Code), strings.TrimSpace(req.Reason)
 	if target == AnnotationApproved {
 		task.RejectionCode, task.RejectionReason = "", ""
+	} else if err := h.assignCVATTaskUsers(c, project, task, task.AnnotatorIDs); err != nil {
+		httpx.Fail(c, 503, 503, "返工 Job 分配失败："+err.Error())
+		return
 	}
 	if err := h.db.Save(&task).Error; err != nil {
 		httpx.Fail(c, 500, 500, "审核结果保存失败")
@@ -396,13 +481,59 @@ func (h *Handler) AnnotationWorkbench(c *gin.Context) {
 	if !ok {
 		return
 	}
+	userID := c.GetUint64("user_id")
+	if userID != project.OwnerUserID && !annotationTaskIncludesUser(task, userID) {
+		httpx.Fail(c, 403, 403, "当前用户未分配到该标注任务")
+		return
+	}
 	var binding ExternalResourceBinding
 	if h.db.Where("tenant_id = ? AND internal_type = ? AND internal_id = ?", project.TenantID, "ANNOTATION_TASK", task.ID).First(&binding).Error != nil {
 		httpx.Fail(c, 409, 409, "CVAT Binding 尚未创建")
 		return
 	}
-	_ = appendAudit(h.db, c, project.ID, "CVAT_WORKBENCH_OPENED", "ANNOTATION_TASK", task.ID, nil, gin.H{"externalId": binding.ExternalID})
-	httpx.OK(c, gin.H{"url": binding.ExternalURL})
+	mapping, err := h.ensureCVATIdentity(c.Request.Context(), project.TenantID, userID)
+	if err != nil {
+		workbenchLaunchError(c, "CVAT 个人身份同步失败："+err.Error())
+		return
+	}
+	assignmentUsers := task.AnnotatorIDs
+	if task.Status == AnnotationReviewing || task.Status == AnnotationApproved ||
+		task.Status == AnnotationExporting || task.Status == AnnotationClosed {
+		assignmentUsers = task.ReviewerIDs
+	} else if _, usersErr := taskUsers(assignmentUsers); usersErr != nil {
+		assignmentUsers = task.ReviewerIDs
+	}
+	if err = h.assignCVATTaskUsers(c, project, task, assignmentUsers); err != nil {
+		workbenchLaunchError(c, "CVAT Job 权限同步失败："+err.Error())
+		return
+	}
+	target := binding.ExternalURL
+	externalID, _ := strconv.ParseInt(binding.ExternalID, 10, 64)
+	if provider, providerErr := cvatClient(); providerErr == nil {
+		if userID == project.OwnerUserID && !annotationTaskIncludesUser(task, userID) {
+			if assignErr := provider.AssignTask(c.Request.Context(), externalID, mapping.CVATUserID); assignErr != nil {
+				workbenchLaunchError(c, "CVAT 项目负责人权限同步失败："+assignErr.Error())
+				return
+			}
+		}
+		if jobs, listErr := provider.ListTaskJobs(c.Request.Context(), externalID); listErr == nil {
+			for _, job := range jobs {
+				if job.Assignee != nil && job.Assignee.ID == mapping.CVATUserID {
+					target = provider.JobURL(externalID, job.ID)
+					break
+				}
+			}
+		}
+	}
+	launchURL, err := h.createWorkbenchLaunch("CVAT", project, userID, "ANNOTATION_TASK", task.ID, target)
+	if err != nil {
+		workbenchLaunchError(c, "CVAT 工作台授权失败："+err.Error())
+		return
+	}
+	_ = appendAudit(h.db, c, project.ID, "CVAT_WORKBENCH_OPENED", "ANNOTATION_TASK", task.ID, nil, gin.H{
+		"externalId": binding.ExternalID, "cvatUserId": mapping.CVATUserID,
+	})
+	httpx.OK(c, gin.H{"url": launchURL, "identity": mapping.CVATUsername, "expiresIn": int(workbenchTicketTTL.Seconds())})
 }
 
 // CVATUserMappingList godoc
@@ -422,19 +553,16 @@ func (h *Handler) CVATUserMappingList(c *gin.Context) {
 // @Security BearerAuth
 // @Router /ai-platform/cvat-user-mappings [put]
 func (h *Handler) CVATUserMappingUpsert(c *gin.Context) {
-	var req CVATUserMapping
-	if c.ShouldBindJSON(&req) != nil || req.PlatformUserID == 0 || req.CVATUserID == 0 || strings.TrimSpace(req.CVATUsername) == "" {
-		httpx.Fail(c, 400, 400, "平台用户、CVAT 用户 ID 与用户名必填")
+	var req struct {
+		PlatformUserID uint64 `json:"platformUserId"`
+	}
+	if c.ShouldBindJSON(&req) != nil || req.PlatformUserID == 0 {
+		httpx.Fail(c, 400, 400, "底座用户必填")
 		return
 	}
-	now := time.Now()
-	req.TenantID, req.Active, req.VerifiedAt = tenantID(c), true, &now
-	var row CVATUserMapping
-	err := h.db.Where(CVATUserMapping{TenantID: req.TenantID, PlatformUserID: req.PlatformUserID}).
-		Assign(map[string]any{"cvat_user_id": req.CVATUserID, "cvat_username": strings.TrimSpace(req.CVATUsername), "active": true, "verified_at": now}).
-		FirstOrCreate(&row).Error
+	row, err := h.ensureCVATIdentity(c.Request.Context(), tenantID(c), req.PlatformUserID)
 	if err != nil {
-		httpx.Fail(c, 500, 500, "CVAT 用户映射保存失败")
+		httpx.Fail(c, 503, 503, "CVAT 身份自动同步失败："+err.Error())
 		return
 	}
 	httpx.OK(c, row)

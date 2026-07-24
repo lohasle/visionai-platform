@@ -79,15 +79,31 @@ type ExternalResourceBinding struct {
 }
 
 type CVATUserMapping struct {
-	ID             uint64     `gorm:"primaryKey" json:"id"`
-	TenantID       uint64     `gorm:"uniqueIndex:uk_cvat_user_mapping;not null" json:"tenantId"`
-	PlatformUserID uint64     `gorm:"uniqueIndex:uk_cvat_user_mapping;not null" json:"platformUserId"`
-	CVATUserID     int64      `gorm:"not null" json:"cvatUserId"`
-	CVATUsername   string     `gorm:"size:128;not null" json:"cvatUsername"`
-	Active         bool       `gorm:"index;not null;default:true" json:"active"`
-	VerifiedAt     *time.Time `json:"verifiedAt"`
-	CreatedAt      time.Time  `json:"createTime"`
-	UpdatedAt      time.Time  `json:"updateTime"`
+	ID               uint64     `gorm:"primaryKey" json:"id"`
+	TenantID         uint64     `gorm:"uniqueIndex:uk_cvat_user_mapping;not null" json:"tenantId"`
+	PlatformUserID   uint64     `gorm:"uniqueIndex:uk_cvat_user_mapping;not null" json:"platformUserId"`
+	CVATUserID       int64      `gorm:"not null" json:"cvatUserId"`
+	CVATUsername     string     `gorm:"size:128;not null" json:"cvatUsername"`
+	CredentialCipher string     `gorm:"type:text;not null" json:"-"`
+	Active           bool       `gorm:"index;not null;default:true" json:"active"`
+	VerifiedAt       *time.Time `json:"verifiedAt"`
+	CreatedAt        time.Time  `json:"createTime"`
+	UpdatedAt        time.Time  `json:"updateTime"`
+}
+
+type WorkbenchTicket struct {
+	ID           uint64     `gorm:"primaryKey" json:"id"`
+	TokenHash    string     `gorm:"size:64;uniqueIndex;not null" json:"-"`
+	Provider     string     `gorm:"size:32;index;not null" json:"provider"`
+	TenantID     uint64     `gorm:"index;not null" json:"tenantId"`
+	ProjectID    uint64     `gorm:"index;not null" json:"projectId"`
+	UserID       uint64     `gorm:"index;not null" json:"userId"`
+	ResourceType string     `gorm:"size:64;not null" json:"resourceType"`
+	ResourceID   uint64     `gorm:"not null" json:"resourceId"`
+	RedirectURL  string     `gorm:"size:2048;not null" json:"-"`
+	ExpiresAt    time.Time  `gorm:"index;not null" json:"expiresAt"`
+	ConsumedAt   *time.Time `gorm:"index" json:"consumedAt"`
+	CreatedAt    time.Time  `json:"createTime"`
 }
 
 type PreannotationRun struct {
@@ -113,4 +129,5 @@ func (AnnotationTask) TableName() string          { return "ai_annotation_task" 
 func (AnnotationRevision) TableName() string      { return "ai_annotation_revision" }
 func (ExternalResourceBinding) TableName() string { return "ai_external_resource_binding" }
 func (CVATUserMapping) TableName() string         { return "ai_cvat_user_mapping" }
+func (WorkbenchTicket) TableName() string         { return "ai_workbench_ticket" }
 func (PreannotationRun) TableName() string        { return "ai_preannotation_run" }

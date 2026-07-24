@@ -34,21 +34,29 @@ type DeploymentRevision struct {
 }
 
 type InferenceTrace struct {
-	ID                   uint64    `gorm:"primaryKey" json:"id"`
-	TenantID             uint64    `gorm:"index;not null" json:"tenantId"`
-	ProjectID            uint64    `gorm:"index;not null" json:"projectId"`
-	DeploymentID         uint64    `gorm:"index;not null" json:"deploymentId"`
-	DeploymentRevisionID uint64    `gorm:"index;not null" json:"deploymentRevisionId"`
-	ModelVersionID       uint64    `gorm:"index;not null" json:"modelVersionId"`
-	TraceID              string    `gorm:"size:64;uniqueIndex;not null" json:"traceId"`
-	AssetID              uint64    `gorm:"index" json:"assetId"`
-	Status               string    `gorm:"size:24;index;not null" json:"status"`
-	LatencyMS            float64   `gorm:"index" json:"latencyMs"`
-	DetectionCount       int       `gorm:"index" json:"detectionCount"`
-	MeanConfidence       float64   `gorm:"index" json:"meanConfidence"`
-	Result               string    `gorm:"type:json;not null" json:"result"`
-	ErrorMessage         string    `gorm:"size:2048" json:"errorMessage"`
-	CreatedAt            time.Time `gorm:"index" json:"createTime"`
+	ID                    uint64    `gorm:"primaryKey" json:"id"`
+	TenantID              uint64    `gorm:"index;not null" json:"tenantId"`
+	ProjectID             uint64    `gorm:"index;not null" json:"projectId"`
+	DeploymentID          uint64    `gorm:"index;not null" json:"deploymentId"`
+	DeploymentRevisionID  uint64    `gorm:"index;not null" json:"deploymentRevisionId"`
+	ModelVersionID        uint64    `gorm:"index;not null" json:"modelVersionId"`
+	TraceID               string    `gorm:"size:64;uniqueIndex;not null" json:"traceId"`
+	AssetID               uint64    `gorm:"index" json:"assetId"`
+	SourceType            string    `gorm:"size:24;index;not null;default:ASSET" json:"sourceType"`
+	SourceName            string    `gorm:"size:512" json:"sourceName"`
+	SourceSHA256          string    `gorm:"size:64;index" json:"sourceSha256"`
+	TestMode              string    `gorm:"size:24;index;not null;default:ONLINE" json:"testMode"`
+	ExpectedLabel         string    `gorm:"size:160" json:"expectedLabel"`
+	MinimumConfidence     float64   `json:"minimumConfidence"`
+	RegressionStatus      string    `gorm:"size:24;index;not null;default:NOT_ASSERTED" json:"regressionStatus"`
+	MatchedDetectionCount int       `gorm:"not null;default:0" json:"matchedDetectionCount"`
+	Status                string    `gorm:"size:24;index;not null" json:"status"`
+	LatencyMS             float64   `gorm:"index" json:"latencyMs"`
+	DetectionCount        int       `gorm:"index" json:"detectionCount"`
+	MeanConfidence        float64   `gorm:"index" json:"meanConfidence"`
+	Result                string    `gorm:"type:json;not null" json:"result"`
+	ErrorMessage          string    `gorm:"size:2048" json:"errorMessage"`
+	CreatedAt             time.Time `gorm:"index" json:"createTime"`
 }
 
 type AlertRule struct {

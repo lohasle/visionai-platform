@@ -135,8 +135,6 @@ export const getCVATUserMappings = () =>
 
 export const saveCVATUserMapping = (data: {
   platformUserId: number
-  cvatUserId: number
-  cvatUsername: string
 }) => request.put<CVATUserMapping>({ url: '/ai-platform/cvat-user-mappings', data })
 
 export const getAssetCollections = (projectId: number) =>

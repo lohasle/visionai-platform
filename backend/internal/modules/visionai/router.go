@@ -13,7 +13,7 @@ func Migrate(db *gorm.DB) error {
 		&AssetImportRun{},
 		&AssetCollection{}, &AssetCollectionItem{}, &AssetTag{},
 		&AnnotationTask{}, &AnnotationRevision{}, &ExternalResourceBinding{},
-		&CVATUserMapping{}, &PreannotationRun{},
+		&CVATUserMapping{}, &WorkbenchTicket{}, &PreannotationRun{},
 		&Dataset{}, &DatasetVersion{}, &DatasetVersionItem{},
 		&DatasetValidationIssue{}, &DatasetUsage{},
 		&TrainingTemplate{}, &TrainingTemplateVersion{}, &TrainingRun{},
@@ -34,6 +34,10 @@ func Migrate(db *gorm.DB) error {
 
 func Register(group *gin.RouterGroup, db *gorm.DB, auth gin.HandlerFunc) {
 	h := NewHandler(db)
+	sso := group.Group("/ai-platform/workbench-sso")
+	sso.GET("/cvat", h.WorkbenchSSOCVAT)
+	sso.GET("/fiftyone", h.WorkbenchSSOFiftyOne)
+	sso.GET("/fiftyone/validate", h.WorkbenchSSOFiftyOneValidate)
 	api := group.Group("/ai-platform", auth)
 	api.GET("/dashboard/summary", h.DashboardSummary)
 	api.GET("/jobs", h.JobPage)
@@ -103,6 +107,8 @@ func Register(group *gin.RouterGroup, db *gorm.DB, auth gin.HandlerFunc) {
 	api.POST("/projects/:id/training-runs", h.TrainingRunCreate)
 	api.GET("/projects/:id/training-runs/compare", h.TrainingRunCompare)
 	api.GET("/projects/:id/training-runs/:runId", h.TrainingRunGet)
+	api.GET("/projects/:id/training-runs/:runId/export", h.TrainingRunExport)
+	api.GET("/projects/:id/training-runs/:runId/artifacts/:artifactId/download", h.TrainingArtifactDownload)
 	api.POST("/projects/:id/training-runs/:runId/cancel", h.TrainingRunCancel)
 	api.POST("/projects/:id/training-runs/:runId/clone", h.TrainingRunClone)
 	api.GET("/projects/:id/evaluation-suites", h.EvaluationSuitePage)
@@ -125,6 +131,7 @@ func Register(group *gin.RouterGroup, db *gorm.DB, auth gin.HandlerFunc) {
 	api.POST("/projects/:id/deployments", h.DeploymentCreate)
 	api.GET("/projects/:id/deployments/:deploymentId", h.DeploymentGet)
 	api.POST("/projects/:id/deployments/:deploymentId/predict", h.DeploymentPredict)
+	api.POST("/projects/:id/deployments/:deploymentId/predict-image", h.DeploymentPredictImage)
 	api.POST("/projects/:id/deployments/:deploymentId/predict-video", h.DeploymentPredictVideo)
 	api.POST("/projects/:id/deployments/:deploymentId/revisions", h.DeploymentRevisionCreate)
 	api.POST("/projects/:id/deployments/:deploymentId/rollback", h.DeploymentRollback)

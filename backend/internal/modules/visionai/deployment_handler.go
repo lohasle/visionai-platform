@@ -130,7 +130,11 @@ func (h *Handler) DeploymentGet(c *gin.Context) {
 	h.db.Where("deployment_id = ?", deployment.ID).Order("id DESC").Limit(100).Find(&traces)
 	h.db.Where("deployment_id = ?", deployment.ID).Order("id DESC").Find(&rules)
 	h.db.Where("deployment_id = ?", deployment.ID).Order("id DESC").Limit(100).Find(&alerts)
-	httpx.OK(c, gin.H{"deployment": deployment, "revisions": revisions, "traces": traces, "alertRules": rules, "alerts": alerts, "metrics": calculateInferenceMetrics(traces)})
+	httpx.OK(c, gin.H{
+		"deployment": deployment, "revisions": revisions, "traces": traces,
+		"alertRules": rules, "alerts": alerts, "metrics": calculateInferenceMetrics(traces),
+		"inferenceStatus": buildInferenceStatus(deployment, revisions, traces),
+	})
 }
 
 type inferenceRequest struct {
@@ -176,7 +180,9 @@ func (h *Handler) DeploymentPredict(c *gin.Context) {
 	trace := InferenceTrace{
 		TenantID: project.TenantID, ProjectID: project.ID, DeploymentID: deployment.ID,
 		DeploymentRevisionID: revision.ID, ModelVersionID: revision.ModelVersionID,
-		TraceID: traceID, AssetID: asset.ID, Status: "SUCCEEDED", LatencyMS: elapsed,
+		TraceID: traceID, AssetID: asset.ID, SourceType: "ASSET", SourceName: asset.Filename,
+		SourceSHA256: asset.SHA256, TestMode: "ONLINE", RegressionStatus: "NOT_ASSERTED",
+		Status: "SUCCEEDED", LatencyMS: elapsed,
 		Result: "{}", CreatedAt: time.Now(),
 	}
 	if predictErr != nil {
@@ -238,7 +244,9 @@ func (h *Handler) DeploymentPredictVideo(c *gin.Context) {
 	trace := InferenceTrace{
 		TenantID: project.TenantID, ProjectID: project.ID, DeploymentID: deployment.ID,
 		DeploymentRevisionID: revision.ID, ModelVersionID: revision.ModelVersionID,
-		TraceID: traceID, Status: "SUCCEEDED", LatencyMS: elapsed, DetectionCount: len(result.Frames),
+		TraceID: traceID, SourceType: "VIDEO_UPLOAD", SourceName: header.Filename,
+		TestMode: "ONLINE", RegressionStatus: "NOT_ASSERTED",
+		Status: "SUCCEEDED", LatencyMS: elapsed, DetectionCount: len(result.Frames),
 		Result: jsonValue(result), CreatedAt: time.Now(),
 	}
 	if predictErr != nil {
