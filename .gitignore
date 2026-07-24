@@ -5,3 +5,7 @@ backend/bin/
 coverage.out
 frontend/node_modules/
 frontend/dist/
+.tools/
+runtime/
+backups/
+_site/

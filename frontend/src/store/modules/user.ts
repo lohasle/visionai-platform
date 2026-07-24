@@ -84,10 +84,16 @@ export const useUserStore = defineStore('admin-user', {
       wsCache.set(CACHE_KEY.USER, userInfo)
     },
     async loginOut() {
-      await loginOut()
-      removeToken()
-      deleteUserCache() // 删除用户缓存
-      this.resetState()
+      try {
+        await loginOut()
+      } finally {
+        // Expired/revoked access tokens can make the server logout endpoint
+        // return 401. Local credentials must still be cleared so the user can
+        // recover by signing in again.
+        removeToken()
+        deleteUserCache()
+        this.resetState()
+      }
     },
     resetState() {
       this.permissions = new Set<string>()

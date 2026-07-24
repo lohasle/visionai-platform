@@ -860,6 +860,700 @@ info:
   title: Nimbus Framework Go API
   version: "1.0"
 paths:
+  /ai-platform/cvat-user-mappings:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: List CVAT user mappings
+      tags:
+      - VisionAI Annotation
+    put:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Upsert and verify a CVAT user mapping
+      tags:
+      - VisionAI Annotation
+  /ai-platform/dashboard/summary:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: VisionAI dashboard summary
+      tags:
+      - VisionAI Workbench
+  /ai-platform/jobs:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Page platform jobs
+      tags:
+      - VisionAI Job
+  /ai-platform/jobs/{id}:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Get a platform job
+      tags:
+      - VisionAI Job
+  /ai-platform/jobs/{id}/cancel:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Request platform job cancellation
+      tags:
+      - VisionAI Job
+  /ai-platform/jobs/{id}/events:
+    get:
+      produces:
+      - text/event-stream
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Stream platform job progress through SSE
+      tags:
+      - VisionAI Job
+  /ai-platform/jobs/{id}/retry:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Retry a failed platform job
+      tags:
+      - VisionAI Job
+  /ai-platform/projects:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Page projects visible to current member
+      tags:
+      - VisionAI Project
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Create project
+      tags:
+      - VisionAI Project
+  /ai-platform/projects/{id}:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Get project
+      tags:
+      - VisionAI Project
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Update project
+      tags:
+      - VisionAI Project
+  /ai-platform/projects/{id}/annotation-tasks:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Page annotation tasks
+      tags:
+      - VisionAI Annotation
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Create a governed annotation task
+      tags:
+      - VisionAI Annotation
+  /ai-platform/projects/{id}/annotation-tasks/{taskId}:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Get annotation task details
+      tags:
+      - VisionAI Annotation
+  /ai-platform/projects/{id}/annotation-tasks/{taskId}/export:
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Export an approved immutable annotation revision
+      tags:
+      - VisionAI Annotation
+  /ai-platform/projects/{id}/annotation-tasks/{taskId}/preannotations:
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Create an idempotent pre-annotation run
+      tags:
+      - VisionAI Annotation
+  /ai-platform/projects/{id}/annotation-tasks/{taskId}/preannotations/{runId}/metrics:
+    put:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Record pre-annotation efficiency metrics
+      tags:
+      - VisionAI Annotation
+  /ai-platform/projects/{id}/annotation-tasks/{taskId}/prepare:
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Create CVAT task and upload governed media
+      tags:
+      - VisionAI Annotation
+  /ai-platform/projects/{id}/annotation-tasks/{taskId}/review:
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Record approval or structured rejection
+      tags:
+      - VisionAI Annotation
+  /ai-platform/projects/{id}/annotation-tasks/{taskId}/status:
+    put:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Advance an annotation task through work and review
+      tags:
+      - VisionAI Annotation
+  /ai-platform/projects/{id}/annotation-tasks/{taskId}/sync:
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Synchronize external CVAT status with rate limiting
+      tags:
+      - VisionAI Annotation
+  /ai-platform/projects/{id}/annotation-tasks/{taskId}/workbench:
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Authorize and audit opening the CVAT workbench
+      tags:
+      - VisionAI Annotation
+  /ai-platform/projects/{id}/archive:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Archive project after lifecycle guard checks
+      tags:
+      - VisionAI Project
+  /ai-platform/projects/{id}/asset-imports:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Page project asset imports
+      tags:
+      - VisionAI Asset
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Create an asynchronous asset import
+      tags:
+      - VisionAI Asset
+  /ai-platform/projects/{id}/asset-imports/{importId}:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Get an asset import report
+      tags:
+      - VisionAI Asset
+  /ai-platform/projects/{id}/assets:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Page project assets
+      tags:
+      - VisionAI Asset
+  /ai-platform/projects/{id}/assets/{assetId}:
+    delete:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Move an asset to the recycle bin
+      tags:
+      - VisionAI Asset
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Get asset metadata and a short-lived preview URL
+      tags:
+      - VisionAI Asset
+  /ai-platform/projects/{id}/assets/{assetId}/purge:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Permanently purge an unreferenced recycled asset
+      tags:
+      - VisionAI Asset
+  /ai-platform/projects/{id}/assets/{assetId}/restore:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Restore an asset from the recycle bin
+      tags:
+      - VisionAI Asset
+  /ai-platform/projects/{id}/assets/{assetId}/tags:
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Replace asset tags
+      tags:
+      - VisionAI Asset
+  /ai-platform/projects/{id}/assets/quality:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Summarize project asset quality states
+      tags:
+      - VisionAI Asset
+  /ai-platform/projects/{id}/clone:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Clone non-sensitive project configuration
+      tags:
+      - VisionAI Project
+  /ai-platform/projects/{id}/collections:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Page asset collections
+      tags:
+      - VisionAI Asset
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Create an asset collection
+      tags:
+      - VisionAI Asset
+  /ai-platform/projects/{id}/collections/{collectionId}/assets:
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Add assets to a mutable collection
+      tags:
+      - VisionAI Asset
+  /ai-platform/projects/{id}/collections/{collectionId}/freeze:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Freeze a collection and protect its asset references
+      tags:
+      - VisionAI Asset
+  /ai-platform/projects/{id}/dataset-versions/{versionId}:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Get dataset version, items, validation and usage
+      tags:
+      - VisionAI Dataset
+  /ai-platform/projects/{id}/dataset-versions/{versionId}/deprecate:
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Deprecate a frozen version without breaking history
+      tags:
+      - VisionAI Dataset
+  /ai-platform/projects/{id}/dataset-versions/{versionId}/freeze:
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Freeze an immutable validated dataset version
+      tags:
+      - VisionAI Dataset
+  /ai-platform/projects/{id}/dataset-versions/{versionId}/validate:
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Validate a dataset version
+      tags:
+      - VisionAI Dataset
+  /ai-platform/projects/{id}/dataset-versions/compare:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Compare two dataset versions
+      tags:
+      - VisionAI Dataset
+  /ai-platform/projects/{id}/datasets:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Page logical datasets
+      tags:
+      - VisionAI Dataset
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Create a logical dataset
+      tags:
+      - VisionAI Dataset
+  /ai-platform/projects/{id}/datasets/{datasetId}/versions:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: List versions of a dataset
+      tags:
+      - VisionAI Dataset
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Create a reproducible dataset version
+      tags:
+      - VisionAI Dataset
+  /ai-platform/projects/{id}/status:
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Activate or suspend a project
+      tags:
+      - VisionAI Project
+  /ai-platform/projects/{id}/training-runs:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Page training runs and experiments
+      tags:
+      - VisionAI Training
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Create and queue a reproducible training run
+      tags:
+      - VisionAI Training
+  /ai-platform/projects/{id}/training-runs/{runId}:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Get training logs, metrics and artifacts
+      tags:
+      - VisionAI Training
+  /ai-platform/projects/{id}/training-runs/{runId}/cancel:
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Request training cancellation and preserve artifacts
+      tags:
+      - VisionAI Training
+  /ai-platform/projects/{id}/training-runs/{runId}/clone:
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Clone a reproducible training configuration
+      tags:
+      - VisionAI Training
+  /ai-platform/projects/{id}/training-runs/compare:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Compare reproducible training experiments
+      tags:
+      - VisionAI Training
+  /ai-platform/projects/{id}/training-template-versions/{templateVersionId}/publish:
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Publish a smoke-tested immutable template version
+      tags:
+      - VisionAI Training
+  /ai-platform/projects/{id}/training-template-versions/{templateVersionId}/smoke:
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Run the mandatory LocalDocker template smoke test
+      tags:
+      - VisionAI Training
+  /ai-platform/projects/{id}/training-templates:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: List versioned training templates
+      tags:
+      - VisionAI Training
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Create a training template
+      tags:
+      - VisionAI Training
+  /ai-platform/projects/{id}/training-templates/{templateId}/versions:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: List immutable template versions
+      tags:
+      - VisionAI Training
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Create an immutable training template version draft
+      tags:
+      - VisionAI Training
+  /ai-platform/projects/{id}/uploads:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Create a resumable asset upload session
+      tags:
+      - VisionAI Asset
+  /ai-platform/projects/{id}/uploads/{sessionId}:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Get resumable upload progress
+      tags:
+      - VisionAI Asset
+  /ai-platform/projects/{id}/uploads/{sessionId}/chunks/{part}:
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Upload one resumable file chunk
+      tags:
+      - VisionAI Asset
+  /ai-platform/projects/{id}/uploads/{sessionId}/complete:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Compose, validate and register an uploaded asset
+      tags:
+      - VisionAI Asset
+  /ai-platform/projects/{projectId}/config:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Get project provider configuration
+      tags:
+      - VisionAI Project
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Update project provider configuration using secret references
+      tags:
+      - VisionAI Project
+  /ai-platform/projects/{projectId}/members:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: List project members
+      tags:
+      - VisionAI Project
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Add or update project member roles
+      tags:
+      - VisionAI Project
+  /ai-platform/projects/{projectId}/members/{userId}:
+    delete:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Remove project member
+      tags:
+      - VisionAI Project
   /app/health:
     get:
       description: Health endpoint used by deployment probes and scaffold modules.

@@ -25,6 +25,7 @@ func SeedBase(db *gorm.DB) error {
 		{ID: 2, Name: "基础设施", Type: 1, Sort: 20, ParentID: 0, Path: "/infra", Icon: "ep:setting", Status: 0, Visible: true, KeepAlive: true, AlwaysShow: true},
 		{ID: 3, Name: "会员中心", Type: 1, Sort: 30, ParentID: 0, Path: "/member", Icon: "ep:user-filled", Status: 0, Visible: true, KeepAlive: true, AlwaysShow: true},
 		{ID: 4, Name: "支付中心", Type: 1, Sort: 40, ParentID: 0, Path: "/pay", Icon: "ep:wallet-filled", Status: 0, Visible: true, KeepAlive: true, AlwaysShow: true},
+		{ID: 5, Name: "VisionAI", Type: 1, Sort: 1, ParentID: 0, Path: "/ai-platform", Icon: "lucide:scan-eye", Status: 0, Visible: true, KeepAlive: true, AlwaysShow: true},
 	}
 	pages := []menuSeed{
 		{100, 1, "用户管理", "user", "ep:avatar", "system/user/index", "SystemUser", 1, []string{"system:user:query", "system:user:create", "system:user:update", "system:user:delete", "system:user:update-password", "system:user:import", "system:user:export", "system:permission:assign-user-role"}},
@@ -63,6 +64,17 @@ func SeedBase(db *gorm.DB) error {
 		{401, 4, "支付应用", "app", "ep:grid", "pay/app/index", "PayApp", 1, []string{"pay:app:query", "pay:app:create", "pay:app:update", "pay:app:delete", "pay:channel:query", "pay:channel:create", "pay:channel:update", "pay:channel:delete"}},
 		{402, 4, "支付订单", "order", "ep:tickets", "pay/order/index", "PayOrder", 2, []string{"pay:order:query", "pay:order:export"}},
 		{403, 4, "退款管理", "refund", "ep:refresh-left", "pay/refund/index", "PayRefund", 3, []string{"pay:refund:query", "pay:refund:create", "pay:refund:update", "pay:refund:delete", "pay:refund:export"}},
+		{501, 5, "工作台", "dashboard", "lucide:layout-dashboard", "ai-platform/dashboard/index", "VisionAIDashboard", 1, []string{"ai-platform:dashboard:query", "ai-platform:job:query", "ai-platform:job:cancel", "ai-platform:job:retry"}},
+		{502, 5, "项目中心", "projects", "lucide:folder-kanban", "ai-platform/projects/index", "VisionAIProjects", 2, []string{"ai-platform:project:query", "ai-platform:project:create", "ai-platform:project:update", "ai-platform:project:archive", "ai-platform:project:member", "ai-platform:project:config"}},
+		{503, 5, "数据资产", "assets", "lucide:images", "ai-platform/assets/index", "VisionAIAssets", 3, []string{"ai-platform:asset:query", "ai-platform:asset:upload", "ai-platform:asset:import", "ai-platform:asset:update", "ai-platform:asset:delete"}},
+		{504, 5, "标注任务", "annotations", "lucide:scan-search", "ai-platform/annotations/index", "VisionAIAnnotations", 4, []string{"ai-platform:annotation:query", "ai-platform:annotation:create", "ai-platform:annotation:prepare", "ai-platform:annotation:review", "ai-platform:annotation:export", "ai-platform:annotation:mapping"}},
+		{505, 5, "数据集注册表", "datasets", "lucide:database-zap", "ai-platform/datasets/index", "VisionAIDatasets", 5, []string{"ai-platform:dataset:query", "ai-platform:dataset:create", "ai-platform:dataset:validate", "ai-platform:dataset:freeze", "ai-platform:dataset:deprecate"}},
+		{506, 5, "训练与实验", "training", "lucide:brain-circuit", "ai-platform/training/index", "VisionAITraining", 6, []string{"ai-platform:training:query", "ai-platform:training:template", "ai-platform:training:smoke", "ai-platform:training:publish", "ai-platform:training:create", "ai-platform:training:cancel", "ai-platform:training:clone"}},
+		{507, 5, "评估与困难样本", "evaluation", "lucide:scan-line", "ai-platform/evaluation/index", "VisionAIEvaluation", 7, []string{"ai-platform:evaluation:query", "ai-platform:evaluation:create", "ai-platform:evaluation:workbench", "ai-platform:evaluation:hard-sample"}},
+		{508, 5, "模型注册与审批", "models", "lucide:badge-check", "ai-platform/models/index", "VisionAIModelRegistry", 8, []string{"ai-platform:model:query", "ai-platform:model:register", "ai-platform:model:approve", "ai-platform:model:export"}},
+		{509, 5, "部署与监控", "deployments", "lucide:activity", "ai-platform/deployments/index", "VisionAIDeployments", 9, []string{"ai-platform:deployment:query", "ai-platform:deployment:create", "ai-platform:deployment:operate", "ai-platform:inference:test", "ai-platform:monitor:query"}},
+		{510, 5, "生产反馈闭环", "feedback", "lucide:refresh-cw", "ai-platform/feedback/index", "VisionAIFeedback", 10, []string{"ai-platform:feedback:query", "ai-platform:feedback:policy", "ai-platform:feedback:review", "ai-platform:feedback:cleanup"}},
+		{511, 5, "资源与集成", "operations", "lucide:server-cog", "ai-platform/operations/index", "VisionAIOperations", 11, []string{"ai-platform:resource:query", "ai-platform:resource:update", "ai-platform:integration:query", "ai-platform:integration:update", "ai-platform:audit:query", "ai-platform:audit:export"}},
 	}
 	for _, group := range groups {
 		if err := upsertMenu(db, group); err != nil {

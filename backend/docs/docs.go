@@ -15,6 +15,1215 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/ai-platform/cvat-user-mappings": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Annotation"
+                ],
+                "summary": "List CVAT user mappings",
+                "responses": {}
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Annotation"
+                ],
+                "summary": "Upsert and verify a CVAT user mapping",
+                "responses": {}
+            }
+        },
+        "/ai-platform/dashboard/summary": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "VisionAI Workbench"
+                ],
+                "summary": "VisionAI dashboard summary",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/jobs": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "VisionAI Job"
+                ],
+                "summary": "Page platform jobs",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/jobs/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "VisionAI Job"
+                ],
+                "summary": "Get a platform job",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/jobs/{id}/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Job"
+                ],
+                "summary": "Request platform job cancellation",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/jobs/{id}/events": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "VisionAI Job"
+                ],
+                "summary": "Stream platform job progress through SSE",
+                "responses": {}
+            }
+        },
+        "/ai-platform/jobs/{id}/retry": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Job"
+                ],
+                "summary": "Retry a failed platform job",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Project"
+                ],
+                "summary": "Page projects visible to current member",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Project"
+                ],
+                "summary": "Create project",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Project"
+                ],
+                "summary": "Get project",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Project"
+                ],
+                "summary": "Update project",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/annotation-tasks": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Annotation"
+                ],
+                "summary": "Page annotation tasks",
+                "responses": {}
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Annotation"
+                ],
+                "summary": "Create a governed annotation task",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/annotation-tasks/{taskId}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Annotation"
+                ],
+                "summary": "Get annotation task details",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/annotation-tasks/{taskId}/export": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Annotation"
+                ],
+                "summary": "Export an approved immutable annotation revision",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/annotation-tasks/{taskId}/preannotations": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Annotation"
+                ],
+                "summary": "Create an idempotent pre-annotation run",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/annotation-tasks/{taskId}/preannotations/{runId}/metrics": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Annotation"
+                ],
+                "summary": "Record pre-annotation efficiency metrics",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/annotation-tasks/{taskId}/prepare": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Annotation"
+                ],
+                "summary": "Create CVAT task and upload governed media",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/annotation-tasks/{taskId}/review": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Annotation"
+                ],
+                "summary": "Record approval or structured rejection",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/annotation-tasks/{taskId}/status": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Annotation"
+                ],
+                "summary": "Advance an annotation task through work and review",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/annotation-tasks/{taskId}/sync": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Annotation"
+                ],
+                "summary": "Synchronize external CVAT status with rate limiting",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/annotation-tasks/{taskId}/workbench": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Annotation"
+                ],
+                "summary": "Authorize and audit opening the CVAT workbench",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/archive": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Project"
+                ],
+                "summary": "Archive project after lifecycle guard checks",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/asset-imports": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Page project asset imports",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Create an asynchronous asset import",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/asset-imports/{importId}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Get an asset import report",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/assets": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Page project assets",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/assets/quality": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Summarize project asset quality states",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/assets/{assetId}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Get asset metadata and a short-lived preview URL",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Move an asset to the recycle bin",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/assets/{assetId}/purge": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Permanently purge an unreferenced recycled asset",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/assets/{assetId}/restore": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Restore an asset from the recycle bin",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/assets/{assetId}/tags": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Replace asset tags",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/clone": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Project"
+                ],
+                "summary": "Clone non-sensitive project configuration",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/collections": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Page asset collections",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Create an asset collection",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/collections/{collectionId}/assets": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Add assets to a mutable collection",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/collections/{collectionId}/freeze": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Freeze a collection and protect its asset references",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/dataset-versions/compare": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Dataset"
+                ],
+                "summary": "Compare two dataset versions",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/dataset-versions/{versionId}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Dataset"
+                ],
+                "summary": "Get dataset version, items, validation and usage",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/dataset-versions/{versionId}/deprecate": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Dataset"
+                ],
+                "summary": "Deprecate a frozen version without breaking history",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/dataset-versions/{versionId}/freeze": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Dataset"
+                ],
+                "summary": "Freeze an immutable validated dataset version",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/dataset-versions/{versionId}/validate": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Dataset"
+                ],
+                "summary": "Validate a dataset version",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/datasets": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Dataset"
+                ],
+                "summary": "Page logical datasets",
+                "responses": {}
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Dataset"
+                ],
+                "summary": "Create a logical dataset",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/datasets/{datasetId}/versions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Dataset"
+                ],
+                "summary": "List versions of a dataset",
+                "responses": {}
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Dataset"
+                ],
+                "summary": "Create a reproducible dataset version",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/status": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Project"
+                ],
+                "summary": "Activate or suspend a project",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/training-runs": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Training"
+                ],
+                "summary": "Page training runs and experiments",
+                "responses": {}
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Training"
+                ],
+                "summary": "Create and queue a reproducible training run",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/training-runs/compare": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Training"
+                ],
+                "summary": "Compare reproducible training experiments",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/training-runs/{runId}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Training"
+                ],
+                "summary": "Get training logs, metrics and artifacts",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/training-runs/{runId}/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Training"
+                ],
+                "summary": "Request training cancellation and preserve artifacts",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/training-runs/{runId}/clone": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Training"
+                ],
+                "summary": "Clone a reproducible training configuration",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/training-template-versions/{templateVersionId}/publish": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Training"
+                ],
+                "summary": "Publish a smoke-tested immutable template version",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/training-template-versions/{templateVersionId}/smoke": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Training"
+                ],
+                "summary": "Run the mandatory LocalDocker template smoke test",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/training-templates": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Training"
+                ],
+                "summary": "List versioned training templates",
+                "responses": {}
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Training"
+                ],
+                "summary": "Create a training template",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/training-templates/{templateId}/versions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Training"
+                ],
+                "summary": "List immutable template versions",
+                "responses": {}
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Training"
+                ],
+                "summary": "Create an immutable training template version draft",
+                "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/uploads": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Create a resumable asset upload session",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/uploads/{sessionId}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Get resumable upload progress",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/uploads/{sessionId}/chunks/{part}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Upload one resumable file chunk",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/uploads/{sessionId}/complete": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Compose, validate and register an uploaded asset",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{projectId}/config": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Project"
+                ],
+                "summary": "Get project provider configuration",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Project"
+                ],
+                "summary": "Update project provider configuration using secret references",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{projectId}/members": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Project"
+                ],
+                "summary": "List project members",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Project"
+                ],
+                "summary": "Add or update project member roles",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{projectId}/members/{userId}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Project"
+                ],
+                "summary": "Remove project member",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/app/health": {
             "get": {
                 "description": "Health endpoint used by deployment probes and scaffold modules.",

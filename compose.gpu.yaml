@@ -1,0 +1,48 @@
+services:
+  inference-gpu:
+    build:
+      context: .
+      dockerfile: deploy/inference/Dockerfile
+    image: visionai/inference:1.0.0
+    profiles: ["inference-gpu"]
+    ports:
+      - "28001:8000"
+    volumes:
+      - visionai-inference-gpu-state:/state
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  gpu-worker:
+    image: visionai/backend:latest
+    profiles: ["gpu-worker"]
+    entrypoint: ["/app/visionai-orchestrator"]
+    environment:
+      NIMBUS_DB_DSN: "nimbus:nimbus_dev@tcp(mysql:3306)/nimbus_platform_go?charset=utf8mb4&parseTime=True&loc=Local"
+      NIMBUS_RABBITMQ_URL: "amqp://visionai:visionai_dev@rabbitmq:5672/"
+      NIMBUS_S3_ENDPOINT: minio:9000
+      NIMBUS_S3_ACCESS_KEY: visionai
+      NIMBUS_S3_SECRET_KEY: visionai_minio_dev
+      NVIDIA_VISIBLE_DEVICES: all
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - visionai-training-work:/training-work
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  visionai-inference-gpu-state:

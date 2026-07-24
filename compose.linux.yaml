@@ -1,0 +1,10 @@
+services:
+  backend:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  orchestrator:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+# Native Linux:
+# docker compose -f compose.yaml -f compose.linux.yaml up -d --build --wait
