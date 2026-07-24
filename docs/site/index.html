@@ -1,305 +1,793 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="VisionAI 企业级计算机视觉平台：把数据、CVAT 标注、训练、FiftyOne 评估、模型审批、部署和生产反馈放进一条可审计流程。">
-  <meta name="theme-color" content="#f4f3ee">
-  <title>VisionAI｜计算机视觉研发与生产工作台</title>
+  <meta name="description" content="VisionAI 企业级计算机视觉算法平台：从数据、CVAT 标注、训练、FiftyOne 评估，到模型审批、部署和生产反馈的一体化可审计工作台。">
+  <meta name="theme-color" content="#07111f">
+  <meta property="og:title" content="VisionAI｜让视觉模型上线，每一步都有证据">
+  <meta property="og:description" content="真实 COCO128 全链路验收：128 张图片、929 个标注框、mAP 0.723、22 个服务健康运行。">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <title>VisionAI｜企业级计算机视觉算法平台</title>
   <style>
     :root {
-      --ink: #142137;
-      --muted: #5f6b7a;
-      --line: #d9dcd8;
-      --paper: #f4f3ee;
+      color-scheme: light;
+      --ink: #07111f;
+      --text: #253248;
+      --muted: #5b6678;
+      --canvas: #f3f6fa;
       --surface: #ffffff;
-      --blue: #155eef;
-      --blue-dark: #0b3fa4;
-      --blue-soft: #e9f0ff;
-      --green: #147a5c;
-      --orange: #a84d14;
-      --navy: #101b2f;
-      --radius: 18px;
-      --shadow: 0 18px 48px rgba(20, 33, 55, .10);
-      --max: 1180px;
+      --line: #d7dee8;
+      --line-dark: #263346;
+      --brand: #155eef;
+      --brand-strong: #0d48bc;
+      --brand-soft: #e9f0ff;
+      --success: #147a5c;
+      --success-soft: #e6f5ef;
+      --warning: #9a4d0f;
+      --dark-muted: #aab5c4;
+      --max: 1280px;
+      --nav-height: 72px;
+      --ease: cubic-bezier(.2, .8, .2, 1);
     }
 
     * { box-sizing: border-box; }
     html { scroll-behavior: smooth; }
     body {
       margin: 0;
-      color: var(--ink);
-      background: var(--paper);
-      font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-      line-height: 1.6;
+      color: var(--text);
+      background: var(--canvas);
+      font-family: Arial, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.65;
       -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
     }
     body.modal-open { overflow: hidden; }
     img { display: block; max-width: 100%; }
     a { color: inherit; text-decoration: none; }
-    button { font: inherit; }
-    .wrap { width: min(var(--max), calc(100% - 40px)); margin: 0 auto; }
+    button { color: inherit; font: inherit; }
+    button, a { touch-action: manipulation; }
+    [hidden] { display: none !important; }
+    section[id] { scroll-margin-top: calc(var(--nav-height) + 24px); }
+
+    .shell {
+      width: min(var(--max), calc(100% - 48px));
+      margin-inline: auto;
+    }
     .skip-link {
-      position: fixed; z-index: 100; left: 18px; top: 12px;
-      padding: 9px 14px; background: var(--ink); color: #fff;
-      transform: translateY(-160%); transition: transform .2s;
+      position: fixed;
+      z-index: 1000;
+      top: 12px;
+      left: 16px;
+      padding: 10px 16px;
+      color: #fff;
+      background: var(--brand);
+      transform: translateY(-160%);
+      transition: transform 180ms var(--ease);
     }
     .skip-link:focus { transform: translateY(0); }
+    :focus-visible {
+      outline: 3px solid #70a0ff;
+      outline-offset: 3px;
+    }
 
     .site-header {
-      position: sticky; top: 0; z-index: 30;
-      background: rgba(244, 243, 238, .94);
-      border-bottom: 1px solid rgba(20, 33, 55, .10);
-      backdrop-filter: blur(14px);
+      position: sticky;
+      z-index: 40;
+      top: 0;
+      color: #fff;
+      background: rgba(7, 17, 31, .96);
+      border-bottom: 1px solid var(--line-dark);
     }
     .nav {
-      min-height: 68px; display: flex; align-items: center;
-      justify-content: space-between; gap: 28px;
+      min-height: var(--nav-height);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 32px;
     }
-    .brand { display: flex; align-items: center; gap: 11px; font-weight: 800; letter-spacing: -.02em; }
+    .brand {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 800;
+      letter-spacing: -.02em;
+    }
     .brand-mark {
-      width: 35px; height: 35px; display: grid; place-items: center;
-      color: #fff; background: var(--blue); border-radius: 10px; font-size: 15px;
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      background: var(--brand);
+      border-radius: 4px;
+      font: 800 13px/1 ui-monospace, "Cascadia Code", Consolas, monospace;
     }
-    .brand small { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .04em; }
-    .nav-links { display: flex; align-items: center; gap: 25px; font-size: 14px; font-weight: 650; }
-    .nav-links a { color: #445064; }
-    .nav-links a:hover, .nav-links a:focus-visible { color: var(--blue); }
+    .brand-copy {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.15;
+    }
+    .brand-copy small {
+      margin-top: 4px;
+      color: var(--dark-muted);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      color: #d2d9e3;
+      font-size: 14px;
+      font-weight: 650;
+    }
+    .nav-links a {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      transition: color 180ms var(--ease), background 180ms var(--ease);
+    }
+    .nav-links a:hover { color: #fff; }
     .nav-links .nav-cta {
-      color: #fff; background: var(--ink); border-radius: 999px;
-      padding: 9px 16px;
+      padding: 0 18px;
+      color: #fff;
+      background: var(--brand);
+      border: 1px solid var(--brand);
     }
-    .nav-links .nav-cta:hover, .nav-links .nav-cta:focus-visible { color: #fff; background: var(--blue-dark); }
+    .nav-links .nav-cta:hover { background: var(--brand-strong); }
 
-    .hero { padding: 76px 0 58px; overflow: hidden; }
-    .hero-copy { max-width: 900px; margin-bottom: 42px; }
-    .kicker {
-      display: inline-flex; align-items: center; gap: 10px;
-      color: var(--blue-dark); text-transform: uppercase; letter-spacing: .13em;
-      font-size: 12px; font-weight: 800;
+    .hero {
+      position: relative;
+      overflow: hidden;
+      color: #fff;
+      background: var(--ink);
+      border-bottom: 1px solid var(--line-dark);
     }
-    .kicker::before { content: ""; width: 28px; height: 2px; background: currentColor; }
+    .hero-grid {
+      min-height: 590px;
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 24px;
+      align-items: end;
+      padding: 76px 0 58px;
+    }
+    .hero-copy { grid-column: 1 / span 8; align-self: start; }
+    .eyebrow, .section-code, .record-label, .proof-label, .card-code {
+      font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      color: #a9c1ff;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .eyebrow::before {
+      content: "";
+      width: 36px;
+      height: 2px;
+      background: var(--brand);
+    }
+    h1, h2, h3, p { overflow-wrap: anywhere; }
     h1 {
-      max-width: 870px; margin: 18px 0 20px;
-      font-size: clamp(44px, 6vw, 76px); line-height: 1.08;
-      letter-spacing: -.055em; font-weight: 800;
+      max-width: 900px;
+      margin: 22px 0 24px;
+      color: #fff;
+      font-size: clamp(48px, 6.4vw, 92px);
+      font-weight: 800;
+      line-height: 1.02;
+      letter-spacing: -.065em;
     }
-    .hero-copy > p { max-width: 760px; margin: 0; color: #4c586a; font-size: clamp(18px, 2vw, 22px); }
-    .hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 30px; }
+    h1 span { display: block; }
+    .hero-lede {
+      max-width: 730px;
+      margin: 0;
+      color: #c5cedb;
+      font-size: clamp(18px, 1.7vw, 22px);
+      line-height: 1.7;
+    }
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      margin-top: 32px;
+    }
     .button {
-      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-      min-height: 46px; padding: 0 19px; border: 1px solid var(--ink);
-      border-radius: 10px; font-size: 14px; font-weight: 750; transition: .18s ease;
+      min-height: 48px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 0 20px;
+      border: 1px solid transparent;
+      border-radius: 2px;
+      font-size: 14px;
+      font-weight: 750;
+      cursor: pointer;
+      transition: background 180ms var(--ease), border-color 180ms var(--ease), color 180ms var(--ease);
     }
-    .button.primary { color: #fff; background: var(--ink); }
-    .button.primary:hover { background: var(--blue-dark); border-color: var(--blue-dark); transform: translateY(-1px); }
-    .button.secondary:hover { color: var(--blue); border-color: var(--blue); background: var(--surface); }
-    .build-note { color: var(--muted); font-size: 13px; margin-left: 7px; }
+    .button svg { width: 17px; height: 17px; }
+    .button.primary { color: #fff; background: var(--brand); border-color: var(--brand); }
+    .button.primary:hover { background: var(--brand-strong); border-color: var(--brand-strong); }
+    .button.secondary { color: #fff; background: transparent; border-color: #667388; }
+    .button.secondary:hover { background: #142238; border-color: #a9b5c6; }
+    .button.ink { color: #fff; background: var(--ink); border-color: var(--ink); }
+    .button.ink:hover { background: #162338; }
 
-    .hero-gallery {
-      position: relative; display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(250px, .72fr);
-      gap: 16px; align-items: stretch;
+    .hero-record {
+      grid-column: 10 / -1;
+      align-self: start;
+      margin-top: 38px;
+      border-top: 1px solid #4b586a;
     }
-    .hero-gallery::before {
-      content: ""; position: absolute; width: 180px; height: 180px;
-      left: -75px; bottom: -55px; border: 1px solid #b9c5d8; border-radius: 50%; z-index: -1;
+    .record-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 20px;
+      align-items: baseline;
+      padding: 15px 0;
+      border-bottom: 1px solid var(--line-dark);
     }
-    .screen {
-      position: relative; overflow: hidden; border: 1px solid rgba(20, 33, 55, .14);
-      border-radius: var(--radius); background: #dfe4ec; box-shadow: var(--shadow);
+    .record-label { color: var(--dark-muted); font-size: 10px; }
+    .record-value {
+      color: #fff;
+      font: 700 13px/1.4 ui-monospace, "Cascadia Code", Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+      text-align: right;
     }
-    .screen img { width: 100%; height: 100%; object-fit: cover; }
-    .screen-button {
-      width: 100%; height: 100%; margin: 0; padding: 0; border: 0;
-      background: none; cursor: zoom-in; text-align: left;
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      display: inline-block;
+      margin-right: 7px;
+      background: #37c38f;
+      border-radius: 50%;
     }
-    .screen-button:focus-visible { outline: 4px solid rgba(21, 94, 239, .45); outline-offset: -4px; }
-    .hero-main { aspect-ratio: 16 / 9; }
-    .hero-side { display: grid; grid-template-rows: 1fr 1fr; gap: 16px; }
-    .hero-side .screen { min-height: 0; }
-    .hero-side img { object-position: top center; }
-    .screen-label {
-      position: absolute; left: 14px; bottom: 14px; z-index: 2;
-      display: flex; align-items: center; gap: 8px; pointer-events: none;
-      padding: 8px 11px; color: #fff; background: rgba(16, 27, 47, .88);
-      border: 1px solid rgba(255, 255, 255, .18); border-radius: 9px;
-      font-size: 12px; font-weight: 750; backdrop-filter: blur(10px);
-    }
-    .screen-label i { width: 7px; height: 7px; background: #53d19c; border-radius: 50%; }
 
-    .proof { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #ebeae5; }
-    .proof-grid { display: grid; grid-template-columns: 1.3fr repeat(4, 1fr); }
-    .proof-item { min-height: 116px; padding: 25px 24px; border-left: 1px solid var(--line); }
-    .proof-item:first-child { border-left: 0; padding-left: 0; }
-    .proof-item strong { display: block; font-size: 28px; letter-spacing: -.035em; line-height: 1.15; }
-    .proof-item span { color: var(--muted); font-size: 13px; }
-    .proof-intro strong { font-size: 16px; letter-spacing: 0; margin-bottom: 6px; }
-
-    .section { padding: 104px 0; }
-    .section-head { display: grid; grid-template-columns: .8fr 1.2fr; gap: 70px; align-items: end; margin-bottom: 48px; }
-    .section-head h2, .scene h2, .closing h2 {
-      margin: 12px 0 0; font-size: clamp(34px, 4vw, 52px);
-      line-height: 1.12; letter-spacing: -.045em;
+    .hero-product {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: minmax(0, 9fr) minmax(220px, 3fr);
+      gap: 0;
+      align-items: stretch;
+      margin-top: 12px;
+      background: #101c2d;
+      border: 1px solid #344155;
     }
-    .section-head > p { margin: 0 0 4px; color: var(--muted); font-size: 17px; }
+    .screen-action {
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      display: block;
+      overflow: hidden;
+      background: #e9edf3;
+      border: 0;
+      cursor: zoom-in;
+      text-align: left;
+    }
+    .screen-action img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: opacity 180ms var(--ease);
+    }
+    .screen-action:hover img { opacity: .94; }
+    .hero-screen { min-height: 450px; border-right: 1px solid #344155; }
+    .hero-screen img { object-position: top left; }
+    .product-rail {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 28px;
+    }
+    .product-rail h2 {
+      margin: 10px 0 12px;
+      color: #fff;
+      font-size: clamp(24px, 2.3vw, 34px);
+      line-height: 1.18;
+      letter-spacing: -.04em;
+    }
+    .product-rail p { margin: 0; color: #acb8c8; font-size: 14px; }
+    .product-stats { margin-top: 32px; }
+    .product-stat {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 13px 0;
+      border-top: 1px solid #344155;
+    }
+    .product-stat span { color: #aab5c4; font-size: 12px; }
+    .product-stat strong {
+      color: #fff;
+      font: 750 21px/1 ui-monospace, "Cascadia Code", Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .proof {
+      color: var(--ink);
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+    }
+    .proof-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border-left: 1px solid var(--line);
+    }
+    .proof-item {
+      min-height: 150px;
+      padding: 26px 28px;
+      border-right: 1px solid var(--line);
+    }
+    .proof-label { color: var(--muted); font-size: 10px; }
+    .proof-value {
+      display: block;
+      margin: 11px 0 7px;
+      color: var(--ink);
+      font: 800 clamp(30px, 3.3vw, 48px)/1 ui-monospace, "Cascadia Code", Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -.05em;
+    }
+    .proof-item p { margin: 0; color: var(--muted); font-size: 13px; }
+
+    .section {
+      padding: 112px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .section.white { background: var(--surface); }
+    .section.dark {
+      color: #fff;
+      background: var(--ink);
+      border-color: var(--line-dark);
+    }
+    .section-head {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 24px;
+      margin-bottom: 58px;
+    }
+    .section-title { grid-column: 1 / span 8; }
+    .section-summary { grid-column: 9 / -1; align-self: end; }
+    .section-code {
+      display: block;
+      margin-bottom: 16px;
+      color: var(--brand);
+      font-size: 11px;
+      font-weight: 750;
+    }
+    .dark .section-code { color: #8eb1ff; }
+    .section h2 {
+      margin: 0;
+      color: var(--ink);
+      font-size: clamp(38px, 5vw, 70px);
+      line-height: 1.07;
+      letter-spacing: -.055em;
+    }
+    .section.dark h2 { color: #fff; }
+    .section-summary p { max-width: 470px; margin: 0; color: var(--muted); }
+    .dark .section-summary p { color: #b8c2d0; }
 
     .workflow {
-      display: grid; grid-template-columns: repeat(7, 1fr);
-      border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
     }
-    .workflow-step { position: relative; padding: 26px 14px 25px; }
-    .workflow-step:first-child { padding-left: 0; }
+    .workflow-step {
+      position: relative;
+      min-height: 190px;
+      padding: 24px 18px;
+      border-right: 1px solid var(--line);
+    }
+    .workflow-step:last-child { border-right: 0; }
     .workflow-step::after {
-      content: ""; position: absolute; right: 9px; top: 32px;
-      width: 23px; height: 1px; background: #aab2bf;
+      content: "";
+      position: absolute;
+      top: -4px;
+      left: 18px;
+      width: 7px;
+      height: 7px;
+      background: var(--brand);
     }
-    .workflow-step:last-child::after { display: none; }
-    .workflow-step span { display: block; color: var(--blue); font: 700 11px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; }
-    .workflow-step strong { display: block; margin-top: 11px; font-size: 15px; }
+    .step-number {
+      color: var(--muted);
+      font: 700 11px/1 ui-monospace, "Cascadia Code", Consolas, monospace;
+    }
+    .workflow-step h3 { margin: 42px 0 8px; color: var(--ink); font-size: 19px; letter-spacing: -.02em; }
+    .workflow-step p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
 
-    .scenes { background: var(--surface); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-    .scene {
-      display: grid; grid-template-columns: .72fr 1.28fr; gap: 72px; align-items: center;
-      padding: 100px 0; border-top: 1px solid var(--line);
+    .story-grid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 24px;
+      align-items: start;
     }
-    .scene:first-child { border-top: 0; }
-    .scene:nth-child(even) { grid-template-columns: 1.28fr .72fr; }
-    .scene:nth-child(even) .scene-copy { order: 2; }
-    .scene-number {
-      display: inline-flex; width: 37px; height: 37px; align-items: center; justify-content: center;
-      border: 1px solid var(--ink); border-radius: 50%; font: 700 12px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+    .story-copy { grid-column: 1 / span 4; position: sticky; top: 112px; }
+    .story-copy h3 {
+      max-width: 420px;
+      margin: 0 0 20px;
+      color: var(--ink);
+      font-size: clamp(30px, 3.4vw, 50px);
+      line-height: 1.12;
+      letter-spacing: -.045em;
     }
-    .scene-copy > p { color: var(--muted); font-size: 17px; margin: 20px 0 24px; }
-    .checks { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
-    .checks li { position: relative; padding-left: 25px; font-size: 14px; }
-    .checks li::before {
-      content: "✓"; position: absolute; left: 0; top: 0;
-      color: var(--green); font-weight: 900;
+    .dark .story-copy h3 { color: #fff; }
+    .story-copy > p { margin: 0; color: var(--muted); }
+    .dark .story-copy > p { color: #b8c2d0; }
+    .fact-list {
+      margin: 30px 0 0;
+      padding: 0;
+      list-style: none;
+      border-top: 1px solid var(--line);
     }
-    .scene-gallery { display: grid; gap: 14px; }
-    .scene-gallery.split { grid-template-columns: 1.2fr .8fr; align-items: stretch; }
-    .scene-gallery.stack { grid-template-columns: 1fr 1fr; }
-    .scene-gallery .screen { box-shadow: 0 13px 35px rgba(20, 33, 55, .09); border-radius: 14px; }
-    .scene-gallery .wide { grid-column: 1 / -1; aspect-ratio: 16 / 9; }
-    .scene-gallery .tall { min-height: 370px; }
-    .scene-gallery .tall img { object-position: top center; }
-    .scene-gallery .half { aspect-ratio: 4 / 3; }
-    .scene-gallery .half img { object-position: top center; }
-    .scene-gallery .crop { aspect-ratio: 16 / 9; }
-    .scene-gallery .crop img { object-position: top center; }
+    .dark .fact-list { border-color: var(--line-dark); }
+    .fact-list li {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 12px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+    }
+    .dark .fact-list li { border-color: var(--line-dark); }
+    .fact-list b {
+      color: var(--brand);
+      font: 700 11px/1.8 ui-monospace, "Cascadia Code", Consolas, monospace;
+    }
+    .dark .fact-list b { color: #8eb1ff; }
+    .story-media {
+      grid-column: 6 / -1;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .media-card {
+      margin: 0;
+      overflow: hidden;
+      background: var(--surface);
+      border: 1px solid var(--line);
+    }
+    .dark .media-card { background: #101c2d; border-color: #344155; }
+    .media-card.wide { grid-column: 1 / -1; }
+    .media-card .screen-action { aspect-ratio: 16 / 9; }
+    .media-card.portrait .screen-action { aspect-ratio: 1 / 1; }
+    .media-caption {
+      min-height: 98px;
+      padding: 18px 20px 20px;
+      border-top: 1px solid var(--line);
+    }
+    .dark .media-caption { border-color: #344155; }
+    .media-caption strong { display: block; color: var(--ink); font-size: 15px; }
+    .dark .media-caption strong { color: #fff; }
+    .media-caption span { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; }
+    .dark .media-caption span { color: #9eabbd; }
 
-    .integration { color: #fff; background: var(--navy); }
-    .integration .section-head > p, .integration .kicker { color: #b8c5db; }
-    .integration-layout { display: grid; grid-template-columns: 1.18fr .82fr; gap: 42px; align-items: start; }
-    .integration .screen { border-color: rgba(255, 255, 255, .16); box-shadow: 0 24px 55px rgba(0, 0, 0, .28); }
-    .integration-copy { padding: 8px 0 0; }
-    .integration-copy h3 { margin: 0 0 13px; font-size: 25px; letter-spacing: -.03em; }
-    .integration-copy p { color: #bdc7d7; margin: 0 0 25px; }
-    .system-list { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid rgba(255,255,255,.15); }
-    .system-list div { padding: 18px 0; border-bottom: 1px solid rgba(255,255,255,.15); }
-    .system-list div:nth-child(even) { padding-left: 18px; border-left: 1px solid rgba(255,255,255,.15); }
-    .system-list strong { display: block; font-size: 14px; }
-    .system-list span { color: #8fa0b9; font-size: 12px; }
+    .gate-board {
+      grid-column: 6 / -1;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      background: #101c2d;
+      border: 1px solid #344155;
+    }
+    .gate-metric {
+      padding: 22px;
+      border-right: 1px solid #344155;
+    }
+    .gate-metric:last-child { border-right: 0; }
+    .gate-metric span { color: #9eabbd; font: 700 10px/1.3 ui-monospace, Consolas, monospace; text-transform: uppercase; }
+    .gate-metric strong {
+      display: block;
+      margin-top: 12px;
+      color: #fff;
+      font: 800 32px/1 ui-monospace, Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+    }
+    .gate-board + .story-media { grid-column: 6 / -1; margin-top: 16px; }
 
-    .evidence-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .architecture {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 24px;
+      align-items: stretch;
+    }
+    .architecture-map {
+      grid-column: 1 / span 5;
+      display: grid;
+      grid-template-columns: 1fr;
+      border: 1px solid var(--line);
+      background: var(--surface);
+    }
+    .arch-layer { padding: 24px; border-bottom: 1px solid var(--line); }
+    .arch-layer:last-child { border-bottom: 0; }
+    .arch-layer.primary { color: #fff; background: var(--ink); }
+    .arch-layer small {
+      display: block;
+      margin-bottom: 10px;
+      color: var(--muted);
+      font: 700 10px/1 ui-monospace, Consolas, monospace;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+    }
+    .arch-layer.primary small { color: #9eabbd; }
+    .arch-layer strong { display: block; color: var(--ink); font-size: 21px; letter-spacing: -.02em; }
+    .arch-layer.primary strong { color: #fff; }
+    .arch-layer p { margin: 7px 0 0; color: var(--muted); font-size: 13px; }
+    .arch-layer.primary p { color: #b8c2d0; }
+    .arch-tools {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 15px;
+    }
+    .arch-tools span {
+      min-height: 44px;
+      display: grid;
+      place-items: center;
+      padding: 8px;
+      color: var(--ink);
+      background: var(--canvas);
+      border: 1px solid var(--line);
+      font: 700 12px/1.2 ui-monospace, Consolas, monospace;
+      text-align: center;
+    }
+    .architecture-media {
+      grid-column: 6 / -1;
+      margin: 0;
+      background: #e9edf3;
+      border: 1px solid var(--line);
+    }
+    .architecture-media .screen-action { height: 100%; min-height: 520px; }
+    .architecture-media img { object-position: top left; }
+
+    .evidence-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 28px;
+    }
+    .filter-button {
+      min-height: 44px;
+      padding: 0 16px;
+      color: var(--muted);
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 2px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      transition: color 180ms var(--ease), background 180ms var(--ease), border-color 180ms var(--ease);
+    }
+    .filter-button:hover { color: var(--ink); border-color: #8f9bad; }
+    .filter-button[aria-pressed="true"] { color: #fff; background: var(--brand); border-color: var(--brand); }
+    .evidence-status {
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      margin-left: auto;
+      color: var(--muted);
+      font: 700 11px/1 ui-monospace, Consolas, monospace;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .evidence-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
     .evidence-card {
-      overflow: hidden; background: var(--surface); border: 1px solid var(--line);
-      border-radius: 15px;
+      min-width: 0;
+      margin: 0;
+      background: var(--surface);
+      border: 1px solid var(--line);
     }
-    .evidence-card .screen { border: 0; border-radius: 0; box-shadow: none; aspect-ratio: 16 / 10; }
-    .evidence-card img { object-position: top center; }
-    .evidence-caption { padding: 19px 20px 21px; }
-    .evidence-caption small { color: var(--blue); font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
-    .evidence-caption h3 { margin: 5px 0 7px; font-size: 18px; }
-    .evidence-caption p { margin: 0; color: var(--muted); font-size: 13px; }
-
-    .closing { padding: 90px 0; }
-    .closing-box {
-      display: grid; grid-template-columns: 1.1fr .9fr; gap: 70px; align-items: end;
-      padding: 52px; background: #dfe8ff; border: 1px solid #bdccef; border-radius: 22px;
+    .evidence-card .screen-action { aspect-ratio: 16 / 9; }
+    .evidence-card.portrait .screen-action { aspect-ratio: 16 / 10; }
+    .evidence-card.portrait img { object-position: top; }
+    .evidence-meta {
+      min-height: 98px;
+      display: grid;
+      grid-template-columns: 64px 1fr;
+      gap: 16px;
+      padding: 16px 18px 18px;
+      border-top: 1px solid var(--line);
     }
-    .closing h2 { max-width: 680px; }
-    .closing aside { color: #43516a; font-size: 14px; }
-    .closing aside p { margin: 0 0 19px; }
-    .closing .hero-actions { margin: 0; }
+    .card-code { color: var(--brand); font-size: 9px; font-weight: 750; }
+    .evidence-meta h3 { margin: 0; color: var(--ink); font-size: 15px; line-height: 1.35; }
+    .evidence-meta p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 
-    footer { padding: 34px 0 44px; border-top: 1px solid var(--line); }
-    .footer-row { display: flex; justify-content: space-between; gap: 24px; color: var(--muted); font-size: 12px; }
-    .footer-links { display: flex; flex-wrap: wrap; gap: 18px; }
-    .footer-links a:hover { color: var(--blue); }
+    .closing {
+      color: #fff;
+      background: var(--brand);
+    }
+    .closing-grid {
+      min-height: 420px;
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 24px;
+      align-items: center;
+      padding: 72px 0;
+    }
+    .closing-copy { grid-column: 1 / span 8; }
+    .closing-copy small {
+      font: 700 11px/1 ui-monospace, Consolas, monospace;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+    }
+    .closing h2 {
+      margin: 20px 0 0;
+      color: #fff;
+      font-size: clamp(42px, 5.7vw, 78px);
+      line-height: 1.03;
+      letter-spacing: -.06em;
+    }
+    .closing-actions { grid-column: 10 / -1; }
+    .closing-actions p { margin: 0 0 24px; color: #e2eaff; }
+    .closing-actions .button { width: 100%; margin-top: 8px; }
+    .closing-actions .button.primary { color: var(--brand); background: #fff; border-color: #fff; }
+    .closing-actions .button.primary:hover { background: #edf3ff; }
+    .closing-actions .button.secondary { color: #fff; border-color: #b8ccff; }
+    .closing-actions .button.secondary:hover { background: rgba(7, 17, 31, .16); }
+
+    footer { color: #aeb9c7; background: var(--ink); border-top: 1px solid var(--line-dark); }
+    .footer-row {
+      min-height: 104px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      font-size: 12px;
+    }
+    .footer-links { display: flex; flex-wrap: wrap; gap: 24px; }
+    .footer-links a { min-height: 44px; display: inline-flex; align-items: center; }
+    .footer-links a:hover { color: #fff; }
 
     .lightbox {
-      position: fixed; inset: 0; z-index: 80; display: none;
-      align-items: center; justify-content: center; padding: 38px;
-      background: rgba(8, 14, 25, .93);
+      position: fixed;
+      z-index: 100;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 32px;
+      background: rgba(2, 7, 15, .88);
     }
     .lightbox.open { display: flex; }
-    .lightbox figure { width: min(1500px, 96vw); max-height: 92vh; margin: 0; }
+    .lightbox figure {
+      max-width: min(1460px, 96vw);
+      max-height: 92vh;
+      margin: 0;
+      overflow: auto;
+      color: #fff;
+      background: #0b1525;
+      border: 1px solid #4c5a6d;
+    }
     .lightbox img {
-      width: 100%; max-height: 84vh; object-fit: contain;
-      border-radius: 10px; background: #fff;
+      max-width: 100%;
+      max-height: calc(92vh - 64px);
+      margin: 0 auto;
+      object-fit: contain;
     }
-    .lightbox figcaption { margin-top: 10px; color: #d9e0ea; text-align: center; font-size: 13px; }
+    .lightbox figcaption { min-height: 54px; padding: 14px 18px; color: #d2d9e3; font-size: 13px; }
     .lightbox-close {
-      position: absolute; right: 20px; top: 17px; width: 42px; height: 42px;
-      color: #fff; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.3);
-      border-radius: 50%; cursor: pointer; font-size: 22px;
+      position: fixed;
+      z-index: 2;
+      top: 20px;
+      right: 20px;
+      width: 48px;
+      height: 48px;
+      display: grid;
+      place-items: center;
+      padding: 0;
+      color: #fff;
+      background: var(--ink);
+      border: 1px solid #6d7888;
+      border-radius: 2px;
+      cursor: pointer;
     }
+    .lightbox-close:hover { background: #1a2940; }
+    .lightbox-close svg { width: 20px; height: 20px; }
 
-    @media (max-width: 980px) {
-      .nav-links a:not(.nav-cta) { display: none; }
-      .hero { padding-top: 58px; }
-      .hero-gallery, .section-head, .scene, .scene:nth-child(even), .integration-layout, .closing-box { grid-template-columns: 1fr; }
-      .hero-side { grid-template-columns: 1fr 1fr; grid-template-rows: none; }
-      .hero-side .screen { aspect-ratio: 16 / 11; }
-      .proof-grid { grid-template-columns: repeat(4, 1fr); }
-      .proof-intro { grid-column: 1 / -1; border-bottom: 1px solid var(--line); }
-      .proof-item:nth-child(2) { border-left: 0; padding-left: 0; }
+    @media (max-width: 1080px) {
+      .hero-copy { grid-column: 1 / span 9; }
+      .hero-record { grid-column: 10 / -1; }
+      .hero-product { grid-template-columns: 1fr; }
+      .hero-screen { min-height: 0; border-right: 0; border-bottom: 1px solid #344155; }
+      .product-rail { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+      .product-stats { margin-top: 0; }
       .workflow { grid-template-columns: repeat(4, 1fr); }
-      .scene { gap: 42px; padding: 76px 0; }
-      .scene:nth-child(even) .scene-copy { order: initial; }
-      .integration-layout { gap: 30px; }
-      .evidence-grid { grid-template-columns: 1fr 1fr; }
-      .closing-box { gap: 34px; }
+      .workflow-step:nth-child(4) { border-right: 0; }
+      .workflow-step:nth-child(n+5) { border-top: 1px solid var(--line); }
+      .story-copy { grid-column: 1 / span 5; }
+      .story-media, .gate-board, .gate-board + .story-media { grid-column: 6 / -1; }
+      .evidence-grid { grid-template-columns: repeat(2, 1fr); }
     }
 
-    @media (max-width: 640px) {
-      .wrap { width: min(100% - 26px, var(--max)); }
-      .brand small { display: none; }
-      .nav { min-height: 60px; }
+    @media (max-width: 820px) {
+      .shell { width: min(100% - 32px, var(--max)); }
+      .nav-links a:not(.nav-cta) { display: none; }
+      .hero-grid { min-height: auto; padding: 58px 0 40px; }
+      .hero-copy, .hero-record, .hero-product { grid-column: 1 / -1; }
+      .hero-record { margin-top: 10px; display: grid; grid-template-columns: repeat(2, 1fr); column-gap: 24px; }
+      .product-rail { grid-template-columns: 1fr; }
+      .proof-grid { grid-template-columns: repeat(2, 1fr); }
+      .proof-item:nth-child(n+3) { border-top: 1px solid var(--line); }
+      .section { padding: 80px 0; }
+      .section-title, .section-summary { grid-column: 1 / -1; }
+      .section-summary { margin-top: 6px; }
+      .workflow { grid-template-columns: repeat(2, 1fr); }
+      .workflow-step { border-top: 1px solid var(--line); }
+      .workflow-step:nth-child(-n+2) { border-top: 0; }
+      .workflow-step:nth-child(even) { border-right: 0; }
+      .workflow-step:nth-child(4) { border-right: 0; }
+      .story-copy, .story-media, .gate-board, .gate-board + .story-media { grid-column: 1 / -1; }
+      .story-copy { position: static; margin-bottom: 24px; }
+      .architecture-map, .architecture-media { grid-column: 1 / -1; }
+      .architecture-media .screen-action { min-height: 0; }
+      .closing-copy, .closing-actions { grid-column: 1 / -1; }
+      .closing-actions { max-width: 460px; }
+    }
+
+    @media (max-width: 560px) {
+      .shell { width: min(100% - 24px, var(--max)); }
+      .brand-copy small { display: none; }
       .nav-links { gap: 0; }
-      .hero { padding: 42px 0 44px; }
-      h1 { font-size: clamp(40px, 13vw, 56px); }
-      .hero-copy > p { font-size: 17px; }
-      .build-note { width: 100%; margin: 2px 0 0; }
-      .hero-gallery { grid-template-columns: 1fr; }
-      .hero-side { grid-template-columns: 1fr 1fr; }
-      .hero-side .screen { aspect-ratio: 1 / 1; }
-      .proof-grid { grid-template-columns: 1fr 1fr; }
-      .proof-item { min-height: 95px; padding: 20px 14px; }
-      .proof-item:nth-child(4) { border-left: 0; padding-left: 0; }
-      .section { padding: 74px 0; }
-      .section-head { gap: 24px; margin-bottom: 35px; }
-      .workflow { grid-template-columns: 1fr 1fr; }
-      .workflow-step { border-bottom: 1px solid var(--line); padding: 19px 10px; }
-      .workflow-step:nth-child(odd) { padding-left: 0; }
-      .workflow-step::after { display: none; }
-      .scene { padding: 66px 0; }
-      .scene h2, .section-head h2, .closing h2 { font-size: 36px; }
-      .scene-gallery.split, .scene-gallery.stack { grid-template-columns: 1fr; }
-      .scene-gallery .wide { grid-column: auto; }
-      .scene-gallery .tall { min-height: auto; aspect-ratio: 1 / 1; }
+      .nav-links .nav-cta { padding-inline: 14px; }
+      .hero-grid { gap: 16px; padding-top: 42px; }
+      h1 { font-size: clamp(40px, 10.8vw, 46px); letter-spacing: -.055em; }
+      .hero-lede { font-size: 17px; }
+      .hero-actions .button { width: 100%; }
+      .hero-record { grid-template-columns: 1fr; }
+      .hero-product { margin-top: 4px; }
+      .product-rail { padding: 20px; }
+      .proof-grid { grid-template-columns: 1fr; border-left: 0; }
+      .proof-item { min-height: 130px; border-right: 0; border-top: 1px solid var(--line); }
+      .proof-item:first-child { border-top: 0; }
+      .section { padding: 68px 0; }
+      .section-head { margin-bottom: 38px; }
+      .section h2 { font-size: clamp(36px, 11vw, 50px); }
+      .workflow { grid-template-columns: 1fr; }
+      .workflow-step, .workflow-step:nth-child(-n+2) { min-height: 150px; border-top: 1px solid var(--line); border-right: 0; }
+      .workflow-step:first-child { border-top: 0; }
+      .workflow-step h3 { margin-top: 30px; }
+      .story-media { grid-template-columns: 1fr; }
+      .media-card.wide { grid-column: auto; }
+      .gate-board { grid-template-columns: 1fr; }
+      .gate-metric { border-right: 0; border-bottom: 1px solid #344155; }
+      .gate-metric:last-child { border-bottom: 0; }
+      .arch-tools { grid-template-columns: 1fr; }
+      .evidence-controls { display: grid; grid-template-columns: repeat(2, 1fr); }
+      .filter-button { width: 100%; }
+      .evidence-status { grid-column: 1 / -1; margin-left: 0; }
       .evidence-grid { grid-template-columns: 1fr; }
-      .system-list { grid-template-columns: 1fr; }
-      .system-list div:nth-child(even) { padding-left: 0; border-left: 0; }
-      .closing-box { padding: 30px 24px; }
-      .footer-row { flex-direction: column; }
-      .lightbox { padding: 14px; }
+      .closing-grid { min-height: auto; padding: 68px 0; }
+      .footer-row { align-items: flex-start; flex-direction: column; padding: 28px 0; }
+      .footer-links a { min-width: 44px; justify-content: center; }
+      .lightbox { padding: 70px 10px 10px; }
+      .lightbox-close { top: 10px; right: 10px; }
     }
 
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
-      *, *::before, *::after { transition-duration: .01ms !important; }
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+      }
     }
   </style>
 </head>
@@ -307,351 +795,513 @@
   <a class="skip-link" href="#main">跳到主要内容</a>
 
   <header class="site-header">
-    <div class="wrap nav">
-      <a class="brand" href="#" aria-label="VisionAI 首页">
-        <span class="brand-mark">VA</span>
-        <span>VisionAI <small>COMPUTER VISION PLATFORM</small></span>
+    <div class="shell nav">
+      <a class="brand" href="#top" aria-label="VisionAI 首页">
+        <span class="brand-mark" aria-hidden="true">VA</span>
+        <span class="brand-copy">VisionAI<small>Computer Vision Operations</small></span>
       </a>
       <nav class="nav-links" aria-label="主导航">
-        <a href="#workflow">研发流程</a>
-        <a href="#scenes">产品场景</a>
+        <a href="#pipeline">全链路</a>
+        <a href="#product">产品场景</a>
+        <a href="#architecture">集成架构</a>
         <a href="#evidence">运行证据</a>
-        <a href="产品手册.md">产品手册</a>
-        <a class="nav-cta" href="https://github.com/lohasle/visionai-platform">GitHub ↗</a>
+        <a class="nav-cta" href="https://github.com/lohasle/visionai-platform" rel="noreferrer">GitHub</a>
       </nav>
     </div>
   </header>
 
   <main id="main">
-    <section class="hero">
-      <div class="wrap">
+    <section class="hero" id="top">
+      <div class="shell hero-grid">
         <div class="hero-copy">
-          <span class="kicker">Enterprise computer vision workspace</span>
-          <h1>把视觉数据、模型和生产问题放在同一张工作台上。</h1>
-          <p>从公开 COCO128 图片进入、CVAT 标注、训练与 FiftyOne 分析，到模型审批、在线部署和困难样本返标。每一步保留版本、责任人和运行证据。</p>
+          <span class="eyebrow">VisionAI / Verified release 2026.07</span>
+          <h1><span>让视觉模型上线，</span><span>每一步都有证据。</span></h1>
+          <p class="hero-lede">从图片入库、CVAT 标注、数据集冻结、训练和 FiftyOne 误差分析，到四眼审批、生产部署与困难样本返标，全部留在同一条可追溯链路里。</p>
           <div class="hero-actions">
-            <a class="button primary" href="#scenes">查看真实产品场景</a>
-            <a class="button secondary" href="产品手册.md">阅读部署与使用手册</a>
-            <span class="build-note">Windows GPU 训练 · Linux 容器化部署</span>
+            <a class="button primary" href="#evidence">
+              查看全链路证据
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h11M11 6l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"/></svg>
+            </a>
+            <a class="button secondary" href="产品手册.md">打开产品手册</a>
           </div>
         </div>
 
-        <div class="hero-gallery" aria-label="VisionAI 真实产品界面">
-          <figure class="screen hero-main">
-            <button class="screen-button" type="button" data-lightbox="screenshots/asset-center.png" data-caption="数据资产中心：128 张 COCO128 真实图片、可用性状态和内容指纹一览">
-              <img src="screenshots/asset-center.png" alt="VisionAI 数据资产中心，展示 128 张 COCO128 图片和缩略图" width="1280" height="720">
-            </button>
-            <figcaption class="screen-label"><i></i> 数据资产中心 · 真实验收数据</figcaption>
-          </figure>
-          <div class="hero-side">
-            <figure class="screen">
-              <button class="screen-button" type="button" data-lightbox="screenshots/cvat-embedded-workbench.png" data-caption="CVAT 内嵌标注工作台：任务上下文与返回 VisionAI 导航保持一致">
-                <img src="screenshots/cvat-embedded-workbench.png" alt="嵌入 VisionAI 工作台的 CVAT 标注任务" width="639" height="654">
-              </button>
-              <figcaption class="screen-label"><i></i> CVAT 标注</figcaption>
-            </figure>
-            <figure class="screen">
-              <button class="screen-button" type="button" data-lightbox="screenshots/fiftyone-embedded-workbench.png" data-caption="FiftyOne 内嵌样本分析：128 个真实样本、标注和预测同屏对照">
-                <img src="screenshots/fiftyone-embedded-workbench.png" alt="嵌入 VisionAI 工作台的 FiftyOne 样本分析界面" width="639" height="654">
-              </button>
-              <figcaption class="screen-label"><i></i> FiftyOne 分析</figcaption>
-            </figure>
-          </div>
-        </div>
-      </div>
-    </section>
+        <aside class="hero-record" aria-label="公开验收摘要">
+          <div class="record-row"><span class="record-label">Environment</span><span class="record-value"><i class="status-dot"></i>Healthy</span></div>
+          <div class="record-row"><span class="record-label">Dataset</span><span class="record-value">COCO128</span></div>
+          <div class="record-row"><span class="record-label">Platform</span><span class="record-value">Windows GPU / Linux</span></div>
+          <div class="record-row"><span class="record-label">Evidence</span><span class="record-value">19 screens</span></div>
+        </aside>
 
-    <section class="proof" aria-label="验收环境关键数据">
-      <div class="wrap proof-grid">
-        <div class="proof-item proof-intro">
-          <strong>不是概念稿，是一套已跑通的环境。</strong>
-          <span>下列数据来自 2026-07-24 端到端验收。</span>
-        </div>
-        <div class="proof-item"><strong>128</strong><span>COCO128 资产已纳管</span></div>
-        <div class="proof-item"><strong>929</strong><span>CVAT 标注框已同步</span></div>
-        <div class="proof-item"><strong>0.723</strong><span>验收模型 mAP</span></div>
-        <div class="proof-item"><strong>22</strong><span>Compose 服务全健康</span></div>
-      </div>
-    </section>
-
-    <section class="section" id="workflow">
-      <div class="wrap">
-        <div class="section-head">
-          <div>
-            <span class="kicker">One traceable route</span>
-            <h2>一条研发链路，不再靠群聊拼上下文。</h2>
-          </div>
-          <p>数据版本、标注任务、训练运行、评估门禁、模型版本和部署 Revision 通过不可变引用串联。出现问题时，可以沿着同一条血缘回到原始样本。</p>
-        </div>
-        <div class="workflow" aria-label="VisionAI 七步工作流">
-          <div class="workflow-step"><span>01 / INGEST</span><strong>资产进入</strong></div>
-          <div class="workflow-step"><span>02 / LABEL</span><strong>CVAT 标注</strong></div>
-          <div class="workflow-step"><span>03 / FREEZE</span><strong>数据集冻结</strong></div>
-          <div class="workflow-step"><span>04 / TRAIN</span><strong>训练运行</strong></div>
-          <div class="workflow-step"><span>05 / EVALUATE</span><strong>质量门禁</strong></div>
-          <div class="workflow-step"><span>06 / RELEASE</span><strong>审批部署</strong></div>
-          <div class="workflow-step"><span>07 / LEARN</span><strong>生产返标</strong></div>
-        </div>
-      </div>
-    </section>
-
-    <section class="scenes" id="scenes">
-      <div class="wrap">
-        <article class="scene">
-          <div class="scene-copy">
-            <span class="scene-number">01</span>
-            <h2>数据先被看见，再进入训练。</h2>
-            <p>上传、批量导入、哈希去重、损坏检测和回收站共用一套资产台账。创建数据集版本时，系统同时生成固定划分、Manifest、质量报告和 Dataset Card。</p>
-            <ul class="checks">
-              <li>对象存储 Key、内容指纹和业务元数据统一检索</li>
-              <li>重复内容、损坏图片和缺少标注在冻结前暴露</li>
-              <li>104/16/8 固定划分可复现，不随训练运行漂移</li>
-            </ul>
-          </div>
-          <div class="scene-gallery split">
-            <figure class="screen tall">
-              <button class="screen-button" type="button" data-lightbox="screenshots/asset-import-dialog.png" data-caption="批量导入任务：受控目录、对象 Key 与重复文件策略">
-                <img loading="lazy" src="screenshots/asset-import-dialog.png" alt="VisionAI 创建批量导入任务对话框" width="1280" height="720">
-              </button>
-            </figure>
-            <figure class="screen tall">
-              <button class="screen-button" type="button" data-lightbox="screenshots/dataset-quality-report.png" data-caption="数据质量与血缘：阻断问题、警告和逐项修复建议">
-                <img loading="lazy" src="screenshots/dataset-quality-report.png" alt="VisionAI 数据集质量与血缘报告" width="1280" height="720">
-              </button>
-            </figure>
-          </div>
-        </article>
-
-        <article class="scene">
-          <div class="scene-copy">
-            <span class="scene-number">02</span>
-            <h2>标注工具留在流程里，不另开一座孤岛。</h2>
-            <p>从 VisionAI 创建 CVAT 任务后，项目、数据集版本和任务状态保持关联。标注人员在内嵌工作台完成生产，管理者仍能回到平台查看上下文和下游使用关系。</p>
-            <ul class="checks">
-              <li>CVAT 原生界面内嵌，不牺牲熟悉的标注操作</li>
-              <li>支持全屏工作台与外部打开两种模式</li>
-              <li>任务回调更新状态，减少人工抄录和漏项</li>
-            </ul>
-          </div>
-          <div class="scene-gallery split">
-            <figure class="screen tall">
-              <button class="screen-button" type="button" data-lightbox="screenshots/cvat-embedded-workbench.png" data-caption="CVAT 内嵌工作台：当前任务、项目和返回路径始终可见">
-                <img loading="lazy" src="screenshots/cvat-embedded-workbench.png" alt="VisionAI 中内嵌的 CVAT 标注工作台" width="639" height="654">
-              </button>
-            </figure>
-            <figure class="screen tall">
-              <button class="screen-button" type="button" data-lightbox="screenshots/cvat-annotation-editor.png" data-caption="CVAT 原生编辑器：COCO128 真实图片与 8 个对象框同步编辑">
-                <img loading="lazy" src="screenshots/cvat-annotation-editor.png" alt="CVAT 编辑器展示 COCO128 真实图片和对象标注框" width="1280" height="720">
-              </button>
-            </figure>
-          </div>
-        </article>
-
-        <article class="scene">
-          <div class="scene-copy">
-            <span class="scene-number">03</span>
-            <h2>训练结果不只看一个总分。</h2>
-            <p>训练模板锁定镜像、参数和资源约束；运行归档日志、指标和制品。评估门禁固定数据版本，并把 FP、FN、置信度和 IoU 切片送进 FiftyOne 做样本级复核。</p>
-            <ul class="checks">
-              <li>Windows RTX 4090 节点通过资源心跳纳管</li>
-              <li>训练制品摘要与数据、代码和环境血缘绑定</li>
-              <li>门禁结论和困难样本切片可以复查、复跑</li>
-            </ul>
-          </div>
-          <div class="scene-gallery stack">
-            <figure class="screen wide crop">
-              <button class="screen-button" type="button" data-lightbox="screenshots/training-experiment.jpg" data-caption="训练与实验：模板、运行状态、数据集版本和制品归档">
-                <img loading="lazy" src="screenshots/training-experiment.jpg" alt="VisionAI 训练与实验运行页面" width="1280" height="720">
-              </button>
-            </figure>
-            <figure class="screen half">
-              <button class="screen-button" type="button" data-lightbox="screenshots/evaluation-gate.jpg" data-caption="评估门禁：mAP 0.723，FP/FN 4/12，结果已通过">
-                <img loading="lazy" src="screenshots/evaluation-gate.jpg" alt="VisionAI 模型评估门禁页面" width="1280" height="720">
-              </button>
-            </figure>
-            <figure class="screen half">
-              <button class="screen-button" type="button" data-lightbox="screenshots/evaluation-hard-samples.jpg" data-caption="困难样本切片：从评估结果下钻到具体误检与漏检">
-                <img loading="lazy" src="screenshots/evaluation-hard-samples.jpg" alt="VisionAI 评估困难样本页面" width="1280" height="720">
-              </button>
-            </figure>
-          </div>
-        </article>
-
-        <article class="scene">
-          <div class="scene-copy">
-            <span class="scene-number">04</span>
-            <h2>模型上线有门槛，出问题也有退路。</h2>
-            <p>只有通过质量门禁并完成职责分离审批的模型，才能获得生产资格。部署保留不可变 Revision；生产低置信度样本经过去重和人工审核后，返回 CVAT 开启下一轮训练。</p>
-            <ul class="checks">
-              <li>提交人与审批人分离，审批理由进入审计记录</li>
-              <li>Endpoint、推理 Trace、性能指标和告警统一查看</li>
-              <li>困难样本按策略采集，不保存完整生产请求体</li>
-            </ul>
-          </div>
-          <div class="scene-gallery stack">
-            <figure class="screen wide crop">
-              <button class="screen-button" type="button" data-lightbox="screenshots/model-registry-approval.jpg" data-caption="模型注册与审批：数据、训练、评估证据形成不可变版本">
-                <img loading="lazy" src="screenshots/model-registry-approval.jpg" alt="VisionAI 模型注册与审批页面" width="1280" height="720">
-              </button>
-            </figure>
-            <figure class="screen half">
-              <button class="screen-button" type="button" data-lightbox="screenshots/deployment-monitoring.jpg" data-caption="部署与监控：生产 Revision、请求、错误率、延迟和置信度">
-                <img loading="lazy" src="screenshots/deployment-monitoring.jpg" alt="VisionAI 部署推理与监控页面" width="1280" height="720">
-              </button>
-            </figure>
-            <figure class="screen half">
-              <button class="screen-button" type="button" data-lightbox="screenshots/feedback-loop.jpg" data-caption="生产反馈闭环：采样、审核、去重和 CVAT 返标任务">
-                <img loading="lazy" src="screenshots/feedback-loop.jpg" alt="VisionAI 生产反馈与再训练闭环页面" width="1280" height="720">
-              </button>
-            </figure>
-          </div>
-        </article>
-      </div>
-    </section>
-
-    <section class="section integration">
-      <div class="wrap">
-        <div class="section-head">
-          <div>
-            <span class="kicker">Infrastructure, visible</span>
-            <h2>算法团队看到资源，平台团队保留控制权。</h2>
-          </div>
-          <p>GPU 节点、训练队列、对象存储和外部实例在一处登记健康状态。业务流程使用真实 CVAT、FiftyOne 和 MinIO，而不是重新造一套缩水版工具。</p>
-        </div>
-        <div class="integration-layout">
-          <figure class="screen">
-            <button class="screen-button" type="button" data-lightbox="screenshots/resources-integrations.jpg" data-caption="资源、集成与审计：Windows RTX 4090 节点在线，外部实例健康">
-              <img loading="lazy" src="screenshots/resources-integrations.jpg" alt="VisionAI 资源、GPU 节点和外部集成页面" width="1280" height="720">
-            </button>
-          </figure>
-          <div class="integration-copy">
-            <h3>平台负责串联，专业工具继续做专业的事。</h3>
-            <p>统一身份、租户边界、项目上下文、对象引用和事件回调，让工具之间的交接变成可追踪流程。</p>
-            <div class="system-list" aria-label="集成组件">
-              <div><strong>CVAT</strong><span>标注任务与返标</span></div>
-              <div><strong>FiftyOne</strong><span>样本级评估分析</span></div>
-              <div><strong>MinIO</strong><span>数据与模型制品</span></div>
-              <div><strong>RabbitMQ</strong><span>异步编排事件</span></div>
-              <div><strong>Windows GPU</strong><span>训练执行节点</span></div>
-              <div><strong>Linux / Docker</strong><span>平台与推理部署</span></div>
+        <div class="hero-product">
+          <button class="screen-action hero-screen" type="button" data-lightbox="screenshots/asset-center.png" data-caption="数据资产中心：COCO128 的 128 张真实图片完成内容校验、可用性检查和对象存储登记。">
+            <img src="screenshots/asset-center.png" width="1280" height="720" alt="VisionAI 数据资产中心，展示 COCO128 图片、状态、哈希摘要和批量导入入口" fetchpriority="high" decoding="async">
+          </button>
+          <div class="product-rail">
+            <div>
+              <span class="section-code">Live workspace</span>
+              <h2>数据不是附件，是整个模型生命周期的起点。</h2>
+              <p>点击界面可查看原始验收截图。页面中的数字均来自同一轮公开数据集 E2E。</p>
+            </div>
+            <div class="product-stats" role="group" aria-label="数据资产状态">
+              <div class="product-stat"><span>项目资产</span><strong>128</strong></div>
+              <div class="product-stat"><span>可用图像</span><strong>128</strong></div>
+              <div class="product-stat"><span>需修复</span><strong>0</strong></div>
+              <div class="product-stat"><span>重复哈希组</span><strong>0</strong></div>
             </div>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="section" id="evidence">
-      <div class="wrap">
-        <div class="section-head">
-          <div>
-            <span class="kicker">Acceptance evidence</span>
-            <h2>关键动作都有界面，也都有证据。</h2>
+    <section class="proof" aria-label="公开验收数据">
+      <div class="shell proof-grid">
+        <article class="proof-item">
+          <span class="proof-label">Images</span>
+          <strong class="proof-value">128</strong>
+          <p>公开 COCO128 实际样本</p>
+        </article>
+        <article class="proof-item">
+          <span class="proof-label">Annotations</span>
+          <strong class="proof-value">929</strong>
+          <p>CVAT 对象框完成同步</p>
+        </article>
+        <article class="proof-item">
+          <span class="proof-label">Evaluation</span>
+          <strong class="proof-value">0.723</strong>
+          <p>mAP 门禁通过，FP/FN 4/12</p>
+        </article>
+        <article class="proof-item">
+          <span class="proof-label">Runtime</span>
+          <strong class="proof-value">22/22</strong>
+          <p>Compose 服务健康运行</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section white" id="pipeline">
+      <div class="shell">
+        <header class="section-head">
+          <div class="section-title">
+            <span class="section-code">01 / One traceable pipeline</span>
+            <h2>七个环节，一条上下文。</h2>
           </div>
-          <p>页面截图来自本地完整 Compose 环境。点击任意截图可查看原图，核对字段、状态和验收数据。</p>
+          <div class="section-summary">
+            <p>每个结果都能回到输入、执行环境和责任人。团队不再用群聊、表格和散落的工具链接拼接发布依据。</p>
+          </div>
+        </header>
+        <ul class="workflow" aria-label="模型研发全链路">
+          <li class="workflow-step"><span class="step-number">01</span><h3>资产</h3><p>内容指纹、存储 Key、质量状态</p></li>
+          <li class="workflow-step"><span class="step-number">02</span><h3>标注</h3><p>CVAT 任务、修订版本、返工记录</p></li>
+          <li class="workflow-step"><span class="step-number">03</span><h3>数据集</h3><p>104/16/8 固定划分与冻结 Manifest</p></li>
+          <li class="workflow-step"><span class="step-number">04</span><h3>训练</h3><p>模板、环境、日志、指标和制品</p></li>
+          <li class="workflow-step"><span class="step-number">05</span><h3>评估</h3><p>门禁、FP/FN 与困难样本切片</p></li>
+          <li class="workflow-step"><span class="step-number">06</span><h3>发布</h3><p>模型版本、四眼审批、Revision</p></li>
+          <li class="workflow-step"><span class="step-number">07</span><h3>反馈</h3><p>采样、去重、审核和 CVAT 返标</p></li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section" id="product">
+      <div class="shell">
+        <header class="section-head">
+          <div class="section-title">
+            <span class="section-code">02 / Data &amp; annotation</span>
+            <h2>先把输入做对，再谈训练速度。</h2>
+          </div>
+          <div class="section-summary">
+            <p>导入任务、内容指纹、质量规则、标注修订和数据集冻结在训练前形成完整证据，而不是训练失败后再追查原始图片。</p>
+          </div>
+        </header>
+        <div class="story-grid">
+          <div class="story-copy">
+            <h3>CVAT 在工作台里，项目上下文没有离开。</h3>
+            <p>算法团队继续使用熟悉的原生标注编辑器；VisionAI 负责项目边界、任务状态、数据版本和下游引用。</p>
+            <ol class="fact-list">
+              <li><b>01</b><span>批量导入前校验受控目录、对象 Key 与重复策略</span></li>
+              <li><b>02</b><span>标注任务与 CVAT 状态双向关联，保留返回路径</span></li>
+              <li><b>03</b><span>冻结前阻断坏图、缺失标注和不可复现划分</span></li>
+            </ol>
+          </div>
+          <div class="story-media">
+            <figure class="media-card wide">
+              <button class="screen-action" type="button" data-lightbox="screenshots/cvat-annotation-editor.png" data-caption="CVAT 原生标注编辑器：COCO128 真实样本与 8 个对象框同屏编辑。">
+                <img loading="lazy" decoding="async" src="screenshots/cvat-annotation-editor.png" width="1280" height="720" alt="CVAT 标注编辑器，展示真实街景图片、对象框、标签列表和标注工具">
+              </button>
+              <figcaption class="media-caption"><strong>原生标注能力，受控项目上下文</strong><span>COCO128 / CVAT TASK 9 / 929 OBJECTS</span></figcaption>
+            </figure>
+            <figure class="media-card portrait">
+              <button class="screen-action" type="button" data-lightbox="screenshots/cvat-embedded-workbench.png" data-caption="VisionAI 内嵌 CVAT 工作台：任务、项目、返回导航和全屏操作保持可见。">
+                <img loading="lazy" decoding="async" src="screenshots/cvat-embedded-workbench.png" width="639" height="654" alt="VisionAI 中内嵌的 CVAT 工作台，包含任务上下文和返回工作台导航">
+              </button>
+              <figcaption class="media-caption"><strong>内嵌工作台</strong><span>任务上下文不丢失</span></figcaption>
+            </figure>
+            <figure class="media-card">
+              <button class="screen-action" type="button" data-lightbox="screenshots/dataset-quality-report.png" data-caption="数据集质量与血缘报告：阻断项、警告、分割比例和逐项修复建议。">
+                <img loading="lazy" decoding="async" src="screenshots/dataset-quality-report.png" width="1280" height="720" alt="VisionAI 数据集质量与血缘报告，展示质量检查、数据划分和修复建议">
+              </button>
+              <figcaption class="media-caption"><strong>冻结前质量门禁</strong><span>104 TRAIN / 16 VAL / 8 TEST</span></figcaption>
+            </figure>
+          </div>
         </div>
+      </div>
+    </section>
+
+    <section class="section dark">
+      <div class="shell">
+        <header class="section-head">
+          <div class="section-title">
+            <span class="section-code">03 / Train &amp; evaluate</span>
+            <h2>总分通过之后，继续追问错在哪里。</h2>
+          </div>
+          <div class="section-summary">
+            <p>评估门禁给出是否可发布的结论；FiftyOne 负责把 FP、FN、IoU 和置信度带回具体样本，让指标有解释路径。</p>
+          </div>
+        </header>
+        <div class="story-grid">
+          <div class="story-copy">
+            <h3>训练产物、环境和数据版本一起归档。</h3>
+            <p>Windows RTX 4090 训练节点通过心跳接入，运行结束后归集日志、指标和制品摘要；评估固定引用已冻结的数据集版本。</p>
+            <ol class="fact-list">
+              <li><b>01</b><span>训练模板锁定镜像、参数 Schema 与资源约束</span></li>
+              <li><b>02</b><span>运行记录保存代码、数据、环境与制品血缘</span></li>
+              <li><b>03</b><span>FiftyOne 内嵌筛选 FP/FN，不只展示报表数字</span></li>
+            </ol>
+          </div>
+          <div class="gate-board" role="group" aria-label="模型评估关键指标">
+            <div class="gate-metric"><span>mAP</span><strong>0.723</strong></div>
+            <div class="gate-metric"><span>False positive</span><strong>4</strong></div>
+            <div class="gate-metric"><span>False negative</span><strong>12</strong></div>
+          </div>
+          <div class="story-media">
+            <figure class="media-card wide">
+              <button class="screen-action" type="button" data-lightbox="screenshots/fiftyone-workbench.jpg" data-caption="FiftyOne 样本级分析：ground truth 与 predictions 同屏比较，按误检和漏检下钻。">
+                <img loading="lazy" decoding="async" src="screenshots/fiftyone-workbench.jpg" width="1280" height="720" alt="FiftyOne 样本分析工作台，展示 COCO128 样本、真实标注与模型预测">
+              </button>
+              <figcaption class="media-caption"><strong>把评估指标落回真实样本</strong><span>EVALUATION RUN 7 / SAMPLE-LEVEL REVIEW</span></figcaption>
+            </figure>
+            <figure class="media-card">
+              <button class="screen-action" type="button" data-lightbox="screenshots/training-experiment.jpg" data-caption="训练与实验中心：模板、运行状态、固定数据集版本和制品归档。">
+                <img loading="lazy" decoding="async" src="screenshots/training-experiment.jpg" width="1280" height="720" alt="VisionAI 训练与实验页面，展示训练模板、运行状态、数据集版本和制品">
+              </button>
+              <figcaption class="media-caption"><strong>可复现训练运行</strong><span>TRAINING RUN 4</span></figcaption>
+            </figure>
+            <figure class="media-card">
+              <button class="screen-action" type="button" data-lightbox="screenshots/evaluation-gate.jpg" data-caption="评估门禁：mAP 0.723，FP/FN 4/12，质量门禁结论通过。">
+                <img loading="lazy" decoding="async" src="screenshots/evaluation-gate.jpg" width="1280" height="720" alt="VisionAI 模型评估门禁页面，展示指标、阈值、结论和困难样本入口">
+              </button>
+              <figcaption class="media-caption"><strong>发布前有明确结论</strong><span>GATE PASSED</span></figcaption>
+            </figure>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section white">
+      <div class="shell">
+        <header class="section-head">
+          <div class="section-title">
+            <span class="section-code">04 / Release &amp; learn</span>
+            <h2>发布不是终点，生产问题要能回到下一版数据。</h2>
+          </div>
+          <div class="section-summary">
+            <p>质量门禁和四眼审批共同决定生产资格；线上低置信度样本经过采样、脱敏、去重和人工审核后返回 CVAT。</p>
+          </div>
+        </header>
+        <div class="story-grid">
+          <div class="story-copy">
+            <h3>版本能追溯，部署能回滚，样本能返标。</h3>
+            <p>模型版本绑定不可变制品、Model Card 和供应链 Manifest；每次部署保留 Revision，生产反馈也保留来源模型与策略。</p>
+            <ol class="fact-list">
+              <li><b>01</b><span>提交人与审批人职责分离，审批理由进入审计</span></li>
+              <li><b>02</b><span>Endpoint、Revision、延迟、错误率和告警关联</span></li>
+              <li><b>03</b><span>反馈批次去重审核后生成 CVAT 返标任务</span></li>
+            </ol>
+          </div>
+          <div class="story-media">
+            <figure class="media-card wide">
+              <button class="screen-action" type="button" data-lightbox="screenshots/model-registry-approval.jpg" data-caption="模型注册与审批：数据、训练、评估和供应链证据形成不可变版本。">
+                <img loading="lazy" decoding="async" src="screenshots/model-registry-approval.jpg" width="1280" height="720" alt="VisionAI 模型注册与审批页面，展示模型版本、证据、审批状态和职责分离">
+              </button>
+              <figcaption class="media-caption"><strong>证据完整，才获得生产资格</strong><span>MODEL VERSION 3 / FOUR-EYES APPROVAL</span></figcaption>
+            </figure>
+            <figure class="media-card">
+              <button class="screen-action" type="button" data-lightbox="screenshots/deployment-monitoring.jpg" data-caption="部署与监控：生产 Revision、请求量、错误率、延迟和置信度保持关联。">
+                <img loading="lazy" decoding="async" src="screenshots/deployment-monitoring.jpg" width="1280" height="720" alt="VisionAI 部署与监控页面，展示生产部署、端点、性能指标和运行状态">
+              </button>
+              <figcaption class="media-caption"><strong>生产状态可见</strong><span>DEPLOYMENT 3</span></figcaption>
+            </figure>
+            <figure class="media-card">
+              <button class="screen-action" type="button" data-lightbox="screenshots/feedback-loop.jpg" data-caption="生产反馈闭环：采样、审核、去重和 CVAT 返标任务完整关联。">
+                <img loading="lazy" decoding="async" src="screenshots/feedback-loop.jpg" width="1280" height="720" alt="VisionAI 生产反馈闭环页面，展示采样策略、反馈批次、审核和返标状态">
+              </button>
+              <figcaption class="media-caption"><strong>问题样本进入下一轮数据</strong><span>FEEDBACK BATCH 2 / CVAT TASK 10</span></figcaption>
+            </figure>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="architecture">
+      <div class="shell">
+        <header class="section-head">
+          <div class="section-title">
+            <span class="section-code">05 / Integrated, not replaced</span>
+            <h2>平台负责串联，专业工具继续做专业的事。</h2>
+          </div>
+          <div class="section-summary">
+            <p>VisionAI 不重造缩小版 CVAT 或 FiftyOne。它统一身份、项目上下文、对象引用、运行编排和审计，把成熟工具嵌进可治理流程。</p>
+          </div>
+        </header>
+        <div class="architecture">
+          <div class="architecture-map" role="group" aria-label="VisionAI 集成架构">
+            <div class="arch-layer primary">
+              <small>Control plane</small>
+              <strong>VisionAI 工作台</strong>
+              <p>项目、权限、编排、状态机、血缘与审计</p>
+            </div>
+            <div class="arch-layer">
+              <small>Specialist tools</small>
+              <strong>原生能力内嵌</strong>
+              <div class="arch-tools"><span>CVAT</span><span>FiftyOne</span><span>MinIO</span></div>
+            </div>
+            <div class="arch-layer">
+              <small>Execution</small>
+              <strong>跨平台运行</strong>
+              <div class="arch-tools"><span>Windows GPU</span><span>Linux</span><span>Docker</span></div>
+            </div>
+            <div class="arch-layer">
+              <small>Evidence</small>
+              <strong>统一对象链路</strong>
+              <p>DatasetVersion → TrainingRun → EvaluationRun → ModelVersion → DeploymentRevision → FeedbackBatch</p>
+            </div>
+          </div>
+          <figure class="architecture-media">
+            <button class="screen-action" type="button" data-lightbox="screenshots/resources-integrations.jpg" data-caption="资源与集成：Windows RTX 4090 节点在线，CVAT、FiftyOne、MinIO 等外部实例健康可查。">
+              <img loading="lazy" decoding="async" src="screenshots/resources-integrations.jpg" width="1280" height="720" alt="VisionAI 资源与集成页面，展示 GPU 节点、训练队列和外部服务健康状态">
+            </button>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="section white" id="evidence">
+      <div class="shell">
+        <header class="section-head">
+          <div class="section-title">
+            <span class="section-code">06 / Acceptance evidence</span>
+            <h2>不是概念图，是完整环境里跑出来的界面。</h2>
+          </div>
+          <div class="section-summary">
+            <p>以下 19 张截图来自同一轮本地 Compose 全链路验收。可以按环节筛选，点击任意界面查看原图和可核对字段。</p>
+          </div>
+        </header>
+
+        <div class="evidence-controls" role="group" aria-label="筛选验收截图">
+          <button class="filter-button" type="button" data-filter="all" aria-pressed="true">全部 19</button>
+          <button class="filter-button" type="button" data-filter="data" aria-pressed="false">数据 5</button>
+          <button class="filter-button" type="button" data-filter="annotation" aria-pressed="false">标注 3</button>
+          <button class="filter-button" type="button" data-filter="build" aria-pressed="false">训练评估 5</button>
+          <button class="filter-button" type="button" data-filter="release" aria-pressed="false">发布反馈 3</button>
+          <button class="filter-button" type="button" data-filter="ops" aria-pressed="false">工作台与资源 3</button>
+          <span class="evidence-status" id="evidence-status" aria-live="polite">显示 19 / 19</span>
+        </div>
+
         <div class="evidence-grid">
-          <article class="evidence-card">
-            <figure class="screen">
-              <button class="screen-button" type="button" data-lightbox="screenshots/dataset-quality-report.png" data-caption="数据集冻结前的质量与血缘检查">
-                <img loading="lazy" src="screenshots/dataset-quality-report.png" alt="数据集质量报告证据" width="1280" height="720">
-              </button>
-            </figure>
-            <div class="evidence-caption"><small>Dataset</small><h3>冻结前解决数据问题</h3><p>阻断项、警告、重复内容和修复建议逐条可查。</p></div>
-          </article>
-          <article class="evidence-card">
-            <figure class="screen">
-              <button class="screen-button" type="button" data-lightbox="screenshots/fiftyone-embedded-workbench.png" data-caption="FiftyOne 内嵌评估工作台">
-                <img loading="lazy" src="screenshots/fiftyone-embedded-workbench.png" alt="FiftyOne 内嵌评估工作台证据" width="639" height="654">
-              </button>
-            </figure>
-            <div class="evidence-caption"><small>Evaluation</small><h3>在样本层面解释指标</h3><p>Ground truth 与 predictions 同屏筛选和对照。</p></div>
-          </article>
-          <article class="evidence-card">
-            <figure class="screen">
-              <button class="screen-button" type="button" data-lightbox="screenshots/deployment-monitoring.jpg" data-caption="生产部署、推理请求和运行指标">
-                <img loading="lazy" src="screenshots/deployment-monitoring.jpg" alt="部署监控运行证据" width="1280" height="720">
-              </button>
-            </figure>
-            <div class="evidence-caption"><small>Production</small><h3>上线后继续看模型表现</h3><p>Revision、延迟、错误率、置信度和告警保持关联。</p></div>
-          </article>
-          <article class="evidence-card">
-            <figure class="screen">
-              <button class="screen-button" type="button" data-lightbox="screenshots/project-center.png" data-caption="项目中心：公开数据验收项目与运行状态">
-                <img loading="lazy" src="screenshots/project-center.png" alt="VisionAI 项目中心运行证据" width="1280" height="720">
-              </button>
-            </figure>
-            <div class="evidence-caption"><small>Workspace</small><h3>项目上下文贯穿全流程</h3><p>数据、实验、模型和部署在同一项目边界下协作。</p></div>
-          </article>
-          <article class="evidence-card">
-            <figure class="screen">
-              <button class="screen-button" type="button" data-lightbox="screenshots/annotation-tasks.png" data-caption="标注任务：VisionAI 状态与 CVAT 外部任务同步">
-                <img loading="lazy" src="screenshots/annotation-tasks.png" alt="VisionAI 标注任务同步证据" width="1280" height="720">
-              </button>
-            </figure>
-            <div class="evidence-caption"><small>Annotation</small><h3>外部标注任务没有失联</h3><p>任务状态、修订版本、对象数量和 CVAT 链接集中可查。</p></div>
-          </article>
-          <article class="evidence-card">
-            <figure class="screen">
-              <button class="screen-button" type="button" data-lightbox="screenshots/dataset-registry.png" data-caption="数据集注册表：版本、划分、质量与冻结状态">
-                <img loading="lazy" src="screenshots/dataset-registry.png" alt="VisionAI 数据集注册表证据" width="1280" height="720">
-              </button>
-            </figure>
-            <div class="evidence-caption"><small>Registry</small><h3>训练输入不可变、可追溯</h3><p>104/16/8 划分、质量结论和冻结版本统一登记。</p></div>
-          </article>
+          <figure class="evidence-card" data-category="data">
+            <button class="screen-action" type="button" data-lightbox="screenshots/asset-center.png" data-caption="数据资产中心：128 张图片、内容指纹和可用性状态。">
+              <img loading="lazy" decoding="async" src="screenshots/asset-center.png" width="1280" height="720" alt="VisionAI 数据资产中心验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">DATA 01</span><div><h3>数据资产中心</h3><p>图片、哈希、存储和可用性统一登记。</p></div></figcaption>
+          </figure>
+          <figure class="evidence-card" data-category="data">
+            <button class="screen-action" type="button" data-lightbox="screenshots/asset-import-dialog.png" data-caption="批量导入任务：受控目录、对象 Key、标签集合和重复策略。">
+              <img loading="lazy" decoding="async" src="screenshots/asset-import-dialog.png" width="1280" height="720" alt="VisionAI 创建批量数据导入任务对话框">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">DATA 02</span><div><h3>受控批量导入</h3><p>导入范围与重复策略在任务前确认。</p></div></figcaption>
+          </figure>
+          <figure class="evidence-card" data-category="data">
+            <button class="screen-action" type="button" data-lightbox="screenshots/dataset-registry.png" data-caption="数据集注册表：版本、划分、质量和冻结状态。">
+              <img loading="lazy" decoding="async" src="screenshots/dataset-registry.png" width="1280" height="720" alt="VisionAI 数据集注册表验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">DATA 03</span><div><h3>数据集注册表</h3><p>训练输入版本不可变、可追溯。</p></div></figcaption>
+          </figure>
+          <figure class="evidence-card" data-category="data">
+            <button class="screen-action" type="button" data-lightbox="screenshots/dataset-quality-report.png" data-caption="数据集质量与血缘：阻断项、警告、固定划分和修复建议。">
+              <img loading="lazy" decoding="async" src="screenshots/dataset-quality-report.png" width="1280" height="720" alt="VisionAI 数据集质量与血缘报告验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">DATA 04</span><div><h3>质量与血缘</h3><p>在冻结前暴露坏图、缺标和重复内容。</p></div></figcaption>
+          </figure>
+          <figure class="evidence-card" data-category="data">
+            <button class="screen-action" type="button" data-lightbox="screenshots/training-artifacts.jpg" data-caption="训练制品：模型、日志、指标与结果 Manifest 归档。">
+              <img loading="lazy" decoding="async" src="screenshots/training-artifacts.jpg" width="1280" height="720" alt="VisionAI 训练制品归档验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">DATA 05</span><div><h3>制品归档</h3><p>输出与输入数据、环境和运行绑定。</p></div></figcaption>
+          </figure>
+
+          <figure class="evidence-card" data-category="annotation">
+            <button class="screen-action" type="button" data-lightbox="screenshots/annotation-tasks.png" data-caption="标注任务：VisionAI 状态与 CVAT 外部任务同步。">
+              <img loading="lazy" decoding="async" src="screenshots/annotation-tasks.png" width="1280" height="720" alt="VisionAI 标注任务列表验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">LABEL 01</span><div><h3>标注任务</h3><p>修订版本、对象数和 CVAT 状态集中可查。</p></div></figcaption>
+          </figure>
+          <figure class="evidence-card portrait" data-category="annotation">
+            <button class="screen-action" type="button" data-lightbox="screenshots/cvat-embedded-workbench.png" data-caption="CVAT 内嵌工作台：任务上下文与返回导航始终可见。">
+              <img loading="lazy" decoding="async" src="screenshots/cvat-embedded-workbench.png" width="639" height="654" alt="VisionAI 内嵌 CVAT 工作台验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">LABEL 02</span><div><h3>CVAT 内嵌工作台</h3><p>原生工具与项目上下文有机衔接。</p></div></figcaption>
+          </figure>
+          <figure class="evidence-card" data-category="annotation">
+            <button class="screen-action" type="button" data-lightbox="screenshots/cvat-annotation-editor.png" data-caption="CVAT 标注编辑器：真实 COCO128 图片和对象框。">
+              <img loading="lazy" decoding="async" src="screenshots/cvat-annotation-editor.png" width="1280" height="720" alt="CVAT 原生标注编辑器验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">LABEL 03</span><div><h3>CVAT 原生编辑器</h3><p>保留成熟的标注交互和审核能力。</p></div></figcaption>
+          </figure>
+
+          <figure class="evidence-card" data-category="build">
+            <button class="screen-action" type="button" data-lightbox="screenshots/training-experiment.jpg" data-caption="训练与实验：模板、运行、数据集版本和制品。">
+              <img loading="lazy" decoding="async" src="screenshots/training-experiment.jpg" width="1280" height="720" alt="VisionAI 训练与实验中心验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">BUILD 01</span><div><h3>训练与实验</h3><p>模板、运行环境和结果在同一记录内。</p></div></figcaption>
+          </figure>
+          <figure class="evidence-card" data-category="build">
+            <button class="screen-action" type="button" data-lightbox="screenshots/evaluation-gate.jpg" data-caption="评估门禁：指标阈值、通过结论和发布依据。">
+              <img loading="lazy" decoding="async" src="screenshots/evaluation-gate.jpg" width="1280" height="720" alt="VisionAI 模型评估门禁验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">BUILD 02</span><div><h3>评估门禁</h3><p>mAP、FP/FN 和门禁结论可核对。</p></div></figcaption>
+          </figure>
+          <figure class="evidence-card" data-category="build">
+            <button class="screen-action" type="button" data-lightbox="screenshots/evaluation-hard-samples.jpg" data-caption="困难样本：从评估结果下钻到具体误检和漏检。">
+              <img loading="lazy" decoding="async" src="screenshots/evaluation-hard-samples.jpg" width="1280" height="720" alt="VisionAI 困难样本分析验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">BUILD 03</span><div><h3>困难样本</h3><p>从汇总指标下钻到具体错误。</p></div></figcaption>
+          </figure>
+          <figure class="evidence-card portrait" data-category="build">
+            <button class="screen-action" type="button" data-lightbox="screenshots/fiftyone-embedded-workbench.png" data-caption="FiftyOne 内嵌评估工作台：样本、标注和预测同屏。">
+              <img loading="lazy" decoding="async" src="screenshots/fiftyone-embedded-workbench.png" width="639" height="654" alt="VisionAI 内嵌 FiftyOne 工作台验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">BUILD 04</span><div><h3>FiftyOne 内嵌工作台</h3><p>样本级分析不脱离评估运行。</p></div></figcaption>
+          </figure>
+          <figure class="evidence-card" data-category="build">
+            <button class="screen-action" type="button" data-lightbox="screenshots/fiftyone-workbench.jpg" data-caption="FiftyOne 样本分析：ground truth 与 predictions 对照。">
+              <img loading="lazy" decoding="async" src="screenshots/fiftyone-workbench.jpg" width="1280" height="720" alt="FiftyOne 样本级评估分析验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">BUILD 05</span><div><h3>样本级误差分析</h3><p>按 FP、FN、IoU 和置信度筛选。</p></div></figcaption>
+          </figure>
+
+          <figure class="evidence-card" data-category="release">
+            <button class="screen-action" type="button" data-lightbox="screenshots/model-registry-approval.jpg" data-caption="模型注册与审批：不可变版本、供应链和四眼审批。">
+              <img loading="lazy" decoding="async" src="screenshots/model-registry-approval.jpg" width="1280" height="720" alt="VisionAI 模型注册与审批验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">SHIP 01</span><div><h3>模型注册与审批</h3><p>发布资格由完整证据和职责分离决定。</p></div></figcaption>
+          </figure>
+          <figure class="evidence-card" data-category="release">
+            <button class="screen-action" type="button" data-lightbox="screenshots/deployment-monitoring.jpg" data-caption="部署与监控：Revision、端点、性能和运行状态。">
+              <img loading="lazy" decoding="async" src="screenshots/deployment-monitoring.jpg" width="1280" height="720" alt="VisionAI 部署与监控验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">SHIP 02</span><div><h3>部署与监控</h3><p>每个 Revision 可定位、可停止、可回滚。</p></div></figcaption>
+          </figure>
+          <figure class="evidence-card" data-category="release">
+            <button class="screen-action" type="button" data-lightbox="screenshots/feedback-loop.jpg" data-caption="生产反馈：采样、审核、去重和 CVAT 返标。">
+              <img loading="lazy" decoding="async" src="screenshots/feedback-loop.jpg" width="1280" height="720" alt="VisionAI 生产反馈闭环验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">SHIP 03</span><div><h3>生产反馈闭环</h3><p>困难样本进入下一轮标注和训练。</p></div></figcaption>
+          </figure>
+
+          <figure class="evidence-card" data-category="ops">
+            <button class="screen-action" type="button" data-lightbox="screenshots/project-center.png" data-caption="项目中心：项目状态、成员和完整生命周期入口。">
+              <img loading="lazy" decoding="async" src="screenshots/project-center.png" width="1280" height="720" alt="VisionAI 项目中心验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">OPS 01</span><div><h3>项目中心</h3><p>数据、实验、模型和部署共享项目边界。</p></div></figcaption>
+          </figure>
+          <figure class="evidence-card" data-category="ops">
+            <button class="screen-action" type="button" data-lightbox="screenshots/project-provider-config.png" data-caption="项目 Provider 配置：标注、训练、评估与存储接入。">
+              <img loading="lazy" decoding="async" src="screenshots/project-provider-config.png" width="1280" height="720" alt="VisionAI 项目 Provider 配置验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">OPS 02</span><div><h3>Provider 配置</h3><p>不同项目选择明确的执行与存储实现。</p></div></figcaption>
+          </figure>
+          <figure class="evidence-card" data-category="ops">
+            <button class="screen-action" type="button" data-lightbox="screenshots/resources-integrations.jpg" data-caption="资源与集成：GPU 节点、训练队列和外部实例健康。">
+              <img loading="lazy" decoding="async" src="screenshots/resources-integrations.jpg" width="1280" height="720" alt="VisionAI 资源与集成验收截图">
+            </button>
+            <figcaption class="evidence-meta"><span class="card-code">OPS 03</span><div><h3>资源与集成</h3><p>Windows GPU 节点和外部服务状态可见。</p></div></figcaption>
+          </figure>
         </div>
       </div>
     </section>
 
     <section class="closing">
-      <div class="wrap closing-box">
-        <div>
-          <span class="kicker">Built for accountable delivery</span>
-          <h2>从第一批图片，到第一次生产回流，完整走一遍。</h2>
+      <div class="shell closing-grid">
+        <div class="closing-copy">
+          <small>Open repository / Reproducible delivery</small>
+          <h2>从第一张图片，到第一次生产回流，完整走一遍。</h2>
         </div>
-        <aside>
-          <p>仓库包含后端、前端、容器编排、E2E 测试、运行手册和验收证据。可从本地一键拉起完整环境。</p>
-          <div class="hero-actions">
-            <a class="button primary" href="https://github.com/lohasle/visionai-platform">查看 GitHub 仓库 ↗</a>
-            <a class="button secondary" href="产品手册.md">打开产品手册</a>
-          </div>
-        </aside>
+        <div class="closing-actions">
+          <p>仓库包含前后端、容器编排、E2E、公开数据验收、运行手册和截图证据。</p>
+          <a class="button primary" href="https://github.com/lohasle/visionai-platform" rel="noreferrer">
+            查看 GitHub 仓库
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h11M11 6l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"/></svg>
+          </a>
+          <a class="button secondary" href="产品手册.md">阅读产品手册</a>
+        </div>
       </div>
     </section>
   </main>
 
   <footer>
-    <div class="wrap footer-row">
+    <div class="shell footer-row">
       <span>© 2026 VisionAI · 企业级计算机视觉算法平台</span>
       <div class="footer-links">
-        <a href="#workflow">研发流程</a>
-        <a href="#scenes">产品场景</a>
-        <a href="#evidence">验收证据</a>
-        <a href="https://github.com/lohasle/visionai-platform">GitHub</a>
+        <a href="#pipeline">全链路</a>
+        <a href="#product">产品场景</a>
+        <a href="#architecture">集成架构</a>
+        <a href="#evidence">运行证据</a>
       </div>
     </div>
   </footer>
 
-  <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="产品截图预览" aria-hidden="true">
-    <button class="lightbox-close" type="button" aria-label="关闭截图预览">×</button>
+  <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="产品截图预览" hidden>
+    <button class="lightbox-close" type="button" aria-label="关闭截图预览">
+      <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m4 4 12 12M16 4 4 16" stroke="currentColor" stroke-width="1.8"/></svg>
+    </button>
     <figure>
-      <img src="" alt="">
+      <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" alt="VisionAI 产品截图预览">
       <figcaption></figcaption>
     </figure>
   </div>
 
   <script>
     (() => {
+      const filterButtons = [...document.querySelectorAll("[data-filter]")];
+      const evidenceCards = [...document.querySelectorAll("[data-category]")];
+      const evidenceStatus = document.getElementById("evidence-status");
+
+      filterButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const selected = button.dataset.filter;
+          filterButtons.forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
+          let visible = 0;
+          evidenceCards.forEach((card) => {
+            const show = selected === "all" || card.dataset.category === selected;
+            card.hidden = !show;
+            if (show) visible += 1;
+          });
+          evidenceStatus.textContent = `显示 ${visible} / ${evidenceCards.length}`;
+        });
+      });
+
       const lightbox = document.getElementById("lightbox");
       const image = lightbox.querySelector("img");
+      const imagePlaceholder = image.src;
       const caption = lightbox.querySelector("figcaption");
       const closeButton = lightbox.querySelector(".lightbox-close");
       let trigger = null;
 
       const close = () => {
         lightbox.classList.remove("open");
-        lightbox.setAttribute("aria-hidden", "true");
+        lightbox.hidden = true;
         document.body.classList.remove("modal-open");
-        image.src = "";
+        image.src = imagePlaceholder;
         if (trigger) trigger.focus();
       };
 
@@ -661,8 +1311,8 @@
           image.src = button.dataset.lightbox;
           image.alt = button.querySelector("img")?.alt || "VisionAI 产品截图";
           caption.textContent = button.dataset.caption || "";
+          lightbox.hidden = false;
           lightbox.classList.add("open");
-          lightbox.setAttribute("aria-hidden", "false");
           document.body.classList.add("modal-open");
           closeButton.focus();
         });
