@@ -165,9 +165,20 @@
       <el-form label-position="top">
         <el-form-item label="实验名称"><el-input v-model="runForm.name" /></el-form-item>
         <div class="form-grid">
-          <el-form-item label="冻结 DatasetVersion ID"
-            ><el-input-number v-model="runForm.datasetVersionId" :min="1"
-          /></el-form-item>
+          <el-form-item label="冻结数据集版本">
+            <el-select
+              v-model="runForm.datasetVersionId"
+              class="full"
+              placeholder="选择当前项目的 FROZEN 版本"
+            >
+              <el-option
+                v-for="version in frozenDatasetVersions"
+                :key="version.id"
+                :label="`${version.datasetName} · ${version.semanticVersion} · ${version.itemCount} 张`"
+                :value="version.id"
+              />
+            </el-select>
+          </el-form-item>
           <el-form-item label="已发布 TemplateVersion">
             <el-select v-model="runForm.templateVersionId" class="full">
               <el-option
@@ -187,6 +198,23 @@
                 value="CLEARML" /></el-select
           ></el-form-item>
           <el-form-item label="队列"><el-input v-model="runForm.queue" /></el-form-item>
+        </div>
+        <div class="form-grid">
+          <el-form-item label="GPU 数量">
+            <el-input-number
+              v-model="runForm.gpuCount"
+              :min="0"
+              :max="availableGPUCount"
+              :disabled="runForm.provider !== 'LOCAL_DOCKER'"
+            />
+          </el-form-item>
+          <el-form-item label="可用加速器">
+            <el-input
+              :model-value="gpuSummary"
+              readonly
+              placeholder="未发现在线 GPU 节点"
+            />
+          </el-form-item>
         </div>
       </el-form>
       <template #footer
@@ -275,6 +303,12 @@
 <script lang="ts" setup>
 import { getProjectPage, type Project } from '@/api/ai-platform/projects'
 import {
+  getDatasets,
+  getDatasetVersions,
+  type DatasetVersion
+} from '@/api/ai-platform/datasets'
+import { getResourceOverview } from '@/api/ai-platform/operations'
+import {
   cancelTrainingRun,
   cloneTrainingRun,
   createTrainingRun,
@@ -305,6 +339,8 @@ const templates = ref<TrainingTemplate[]>([])
 const selectedTemplate = ref<TrainingTemplate>()
 const versions = ref<TrainingTemplateVersion[]>([])
 const runs = ref<TrainingRun[]>([])
+const frozenDatasetVersions = ref<Array<DatasetVersion & { datasetName: string }>>([])
+const computeNodes = ref<Array<Record<string, any>>>([])
 const templateVisible = ref(false)
 const versionVisible = ref(false)
 const runVisible = ref(false)
@@ -319,11 +355,23 @@ const templateForm = reactive({ name: '', aiType: 'CV_DETECTION', description: '
 const versionForm = reactive({ trainer: 'LocalDockerSmoke', imageRef: '', entrypoint: '' })
 const runForm = reactive({
   name: '',
-  datasetVersionId: 1,
+  datasetVersionId: undefined as number | undefined,
   templateVersionId: undefined as number | undefined,
   provider: 'LOCAL_DOCKER',
-  queue: 'cpu-local'
+  queue: 'gpu-local',
+  gpuCount: 1
 })
+const onlineGPUNodes = computed(() =>
+  computeNodes.value.filter((node) => node.status === 'ONLINE' && Number(node.gpuCount) > 0)
+)
+const availableGPUCount = computed(() =>
+  onlineGPUNodes.value.reduce((total, node) => total + Number(node.gpuCount || 0), 0)
+)
+const gpuSummary = computed(() =>
+  onlineGPUNodes.value.length
+    ? onlineGPUNodes.value.map((node) => `${node.gpuModel} × ${node.gpuCount}`).join('，')
+    : ''
+)
 const publishedVersions = computed(() => versions.value.filter((item) => item.published))
 const activeRuns = computed(() => runs.value.filter((item) => isActive(item.status)).length)
 const succeededRuns = computed(
@@ -366,12 +414,29 @@ const loadAll = async (background = false) => {
   if (!background) loading.value = true
   try {
     const selectedId = selectedTemplate.value?.id
-    const [templateRows, runRows] = await Promise.all([
+    const [templateRows, runRows, datasetRows, resources] = await Promise.all([
       getTrainingTemplates(projectId.value),
-      getTrainingRuns(projectId.value)
+      getTrainingRuns(projectId.value),
+      getDatasets(projectId.value),
+      getResourceOverview()
     ])
     templates.value = templateRows
     runs.value = runRows.list
+    computeNodes.value = resources.nodes
+    const versionGroups = await Promise.all(
+      datasetRows.map(async (dataset) =>
+        (await getDatasetVersions(projectId.value!, dataset.id))
+          .filter((version) => version.status === 'FROZEN')
+          .map((version) => ({ ...version, datasetName: dataset.name }))
+      )
+    )
+    frozenDatasetVersions.value = versionGroups.flat()
+    if (!frozenDatasetVersions.value.some((version) => version.id === runForm.datasetVersionId))
+      runForm.datasetVersionId = frozenDatasetVersions.value[0]?.id
+    if (availableGPUCount.value > 0 && runForm.provider === 'LOCAL_DOCKER') {
+      runForm.gpuCount = Math.max(1, Math.min(runForm.gpuCount, availableGPUCount.value))
+      runForm.queue = 'gpu-local'
+    }
     const nextTemplate =
       templates.value.find((item) => item.id === selectedId) || templates.value[0]
     if (nextTemplate && nextTemplate.id !== selectedTemplate.value?.id)
@@ -435,18 +500,26 @@ const submitVersion = async () => {
   }
 }
 const submitRun = async () => {
-  if (!projectId.value || !runForm.name.trim() || !runForm.templateVersionId) {
-    message.warning('请填写实验名称并选择已发布模板版本')
+  if (
+    !projectId.value ||
+    !runForm.name.trim() ||
+    !runForm.templateVersionId ||
+    !runForm.datasetVersionId
+  ) {
+    message.warning('请填写实验名称，并选择冻结数据集与已发布模板版本')
+    return
+  }
+  if (runForm.provider === 'LOCAL_DOCKER' && runForm.gpuCount < 1) {
+    message.warning('本机已配置 GPU 训练，请至少分配 1 块 GPU')
     return
   }
   submitting.value = true
   try {
     await createTrainingRun(projectId.value, {
       ...runForm,
-      gpuCount: 0,
       priority: 50,
       parameters: {},
-      runtimeSpec: { cpu: 1, memoryBytes: 536870912 },
+      runtimeSpec: { cpus: 2, memoryBytes: 4294967296 },
       codeCommit: 'local-acceptance'
     })
     runVisible.value = false

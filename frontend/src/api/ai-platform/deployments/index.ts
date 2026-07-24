@@ -130,7 +130,7 @@ export const predictImage = (
   data.append('file', file)
   if (expectedLabel?.trim()) data.append('expectedLabel', expectedLabel.trim())
   if (minimumConfidence !== undefined) data.append('minimumConfidence', String(minimumConfidence))
-  return request.post<ImageRegressionResponse>({
+  return request.postMultipart<ImageRegressionResponse>({
     url: `/ai-platform/projects/${projectId}/deployments/${deploymentId}/predict-image`,
     data
   })

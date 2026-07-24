@@ -709,6 +709,28 @@ paths:
       summary: VisionAI dashboard summary
       tags:
       - VisionAI Workbench
+  /ai-platform/integrations/{instanceId}/test:
+    post:
+      parameters:
+      - description: Integration instance ID
+        in: path
+        name: instanceId
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Test an integration using its provider-internal health endpoint
+      tags:
+      - VisionAI Operations
   /ai-platform/jobs:
     get:
       produces:

@@ -58,6 +58,42 @@
                 }
             }
         },
+        "/ai-platform/integrations/{instanceId}/test": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Operations"
+                ],
+                "summary": "Test an integration using its provider-internal health endpoint",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Integration instance ID",
+                        "name": "instanceId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/ai-platform/jobs": {
             "get": {
                 "security": [

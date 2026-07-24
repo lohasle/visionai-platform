@@ -242,6 +242,20 @@ services:
       retries: 3
     restart: unless-stopped
 
+  trainer-gpu:
+    build:
+      context: .
+      dockerfile: deploy/trainer-gpu/Dockerfile
+    image: visionai/trainer-gpu:cuda12.6
+    profiles: ["gpu"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
   fiftyone:
     build:
       context: .

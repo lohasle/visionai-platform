@@ -303,8 +303,10 @@ func (h *Handler) FeedbackBatchReview(c *gin.Context) {
 	task := AnnotationTask{
 		TenantID: project.TenantID, ProjectID: project.ID, Name: "反馈返标-" + batch.Name,
 		TaskType: "DETECTION", OntologyVersion: "feedback-v1",
-		Labels: jsonValue([]gin.H{{"name": "defect", "color": "#ef4444"}}), AnnotatorIDs: "[]", ReviewerIDs: jsonValue([]uint64{c.GetUint64("user_id")}),
-		Status: AnnotationPreparing, CreatedBy: c.GetUint64("user_id"),
+		Labels:       jsonValue([]gin.H{{"name": "defect", "color": "#ef4444"}}),
+		AnnotatorIDs: jsonValue([]uint64{project.OwnerUserID}),
+		ReviewerIDs:  jsonValue([]uint64{c.GetUint64("user_id")}),
+		Status:       AnnotationPreparing, CreatedBy: c.GetUint64("user_id"),
 	}
 	job := PlatformJob{
 		TenantID: project.TenantID, ProjectID: project.ID, JobType: "ANNOTATION_PREPARE",

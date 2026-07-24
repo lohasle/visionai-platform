@@ -349,21 +349,48 @@ Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/dataset-ver
 $datasetFrozen = Wait-VisionAIStatus -Path "/ai-platform/projects/$projectId/dataset-versions/$datasetVersionId" `
     -ReadStatus { param($data) $data.version.status } -Success @("FROZEN") -Failure @("DRAFT", "FAILED") -TimeoutSeconds 300
 
-Write-Step "Running the LocalDocker training contract"
-$trainerDigest = "sha256:6b9965ec41a383bdae49aa329971e4cb833b200ab202a71c7559af2c96c5c0da"
+Write-Step "Registering the RTX 3060 node and running the LocalDocker CUDA contract"
+$gpuModel = (& nvidia-smi --query-gpu=name --format=csv,noheader | Select-Object -First 1).Trim()
+$gpuMemoryMiB = [int]((& nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | Select-Object -First 1).Trim())
+$driverVersion = (& nvidia-smi --query-gpu=driver_version --format=csv,noheader | Select-Object -First 1).Trim()
+if (-not $gpuModel) {
+    throw "No NVIDIA GPU was detected for the required GPU acceptance run"
+}
+Invoke-VisionAI -Method Post -Path "/ai-platform/resources/nodes/heartbeat" -Body @{
+    nodeKey = "windows-rtx3060"
+    name = "Windows RTX 3060 workstation"
+    gpuModel = $gpuModel
+    gpuCount = 1
+    gpuMemoryBytes = [int64]$gpuMemoryMiB * 1MB
+    gpuUsedBytes = 0
+    driverVersion = $driverVersion
+    cudaVersion = "12.6"
+    labels = @{ os = "windows"; runtime = "docker-desktop"; acceptance = "COCO128" }
+} | Out-Null
+Invoke-VisionAI -Method Put -Path "/ai-platform/resources/queues" -Body @{
+    name = "gpu-local"
+    provider = "LOCAL_DOCKER"
+    externalQueue = "gpu-local"
+    priority = 100
+    enabled = $true
+} | Out-Null
+$trainerDigest = (docker image inspect visionai/trainer-gpu:cuda12.6 --format '{{.Id}}').Trim()
+if (-not $trainerDigest.StartsWith("sha256:")) {
+    throw "Immutable GPU trainer image ID is unavailable"
+}
 $template = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/training-templates" -Body @{
-    name = "COCO128 LocalDocker Trainer"
+    name = "COCO128 RTX 3060 CUDA Trainer"
     aiType = "CV_DETECTION"
-    description = "Immutable training contract used for COCO128 lifecycle acceptance."
+    description = "Immutable CUDA trainer that reads staged COCO128 images and records GPU evidence."
 }
 $templateId = [int64]$template.id
 $templateVersion = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/training-templates/$templateId/versions" -Body @{
-    trainer = "LocalDockerSmoke"
+    trainer = "CuPyImageRegression"
     imageRef = $trainerDigest
     entrypoint = ""
     parameterSchema = @{ type = "object"; properties = @{ epochs = @{ type = "integer"; minimum = 1 } } }
     outputProtocol = "visionai.result-manifest.v1"
-    resourceRequirements = @{ cpu = 1; memoryBytes = 536870912; gpuMax = 0 }
+    resourceRequirements = @{ cpu = 2; memoryBytes = 4294967296; gpuMin = 1; gpuMax = 1 }
     compatibility = @{ taskTypes = @("CV_DETECTION") }
     licensePolicy = @{ allowed = $true; dataset = "COCO128" }
 }
@@ -371,16 +398,16 @@ $templateVersionId = [int64]$templateVersion.id
 Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/training-template-versions/$templateVersionId/smoke" | Out-Null
 Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/training-template-versions/$templateVersionId/publish" | Out-Null
 $training = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/training-runs" -Body @{
-    name = "COCO128 Baseline Training"
+    name = "COCO128 RTX 3060 GPU Training"
     datasetVersionId = $datasetVersionId
     templateVersionId = $templateVersionId
     provider = "LOCAL_DOCKER"
-    queue = "cpu-local"
-    gpuCount = 0
+    queue = "gpu-local"
+    gpuCount = 1
     priority = 50
-    parameters = @{ epochs = 1; dataset = "COCO128"; imageSize = 640 }
-    runtimeSpec = @{ memoryBytes = 536870912; cpus = 1 }
-    codeCommit = "coco128-public-acceptance"
+    parameters = @{ epochs = 12; dataset = "COCO128"; imageSize = 64 }
+    runtimeSpec = @{ memoryBytes = 4294967296; cpus = 2 }
+    codeCommit = "coco128-rtx3060-acceptance"
     pretrainedRef = "none"
 } -ExtraHeaders @{ "Idempotency-Key" = "coco128-training-$RunTag" }
 $trainingRunId = [int64]$training.run.id

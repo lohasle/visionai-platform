@@ -188,6 +188,10 @@ func (h *Handler) TrainingTemplateSmoke(c *gin.Context) {
 		return
 	}
 	cfg := config.Load()
+	var requirements struct {
+		GPUMin int `json:"gpuMin"`
+	}
+	_ = json.Unmarshal([]byte(version.ResourceRequirements), &requirements)
 	runID := uint64(time.Now().UnixNano())
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Minute)
 	defer cancel()
@@ -198,7 +202,7 @@ func (h *Handler) TrainingTemplateSmoke(c *gin.Context) {
 		RunID: runID, ImageRef: version.ImageRef, Entrypoint: version.Entrypoint,
 		OutputDir:          filepath.Join(cfg.TrainingWorkRoot, "template-smoke", strconv.FormatUint(version.ID, 10)),
 		DatasetManifestURI: "s3://visionai-assets/smoke/dataset-manifest.json", ParametersJSON: "{}",
-		MemoryBytes: 512 << 20, CPUs: 1,
+		MemoryBytes: 512 << 20, CPUs: 1, GPUCount: requirements.GPUMin,
 	})
 	if err != nil {
 		version.SmokeStatus, version.SmokeReport = "FAILED", jsonValue(gin.H{"error": err.Error(), "log": string(log)})
@@ -265,6 +269,14 @@ func (h *Handler) validateTrainingDependencies(project Project, req trainingRunR
 	if req.GPUCount < 0 || req.GPUCount > 8 {
 		return dataset, templateVersion, "GPU 数量超出模板执行范围"
 	}
+	var requirements struct {
+		GPUMin int `json:"gpuMin"`
+		GPUMax int `json:"gpuMax"`
+	}
+	_ = json.Unmarshal([]byte(templateVersion.ResourceRequirements), &requirements)
+	if req.GPUCount < requirements.GPUMin || (requirements.GPUMax > 0 && req.GPUCount > requirements.GPUMax) {
+		return dataset, templateVersion, "GPU 数量不满足模板资源约束"
+	}
 	return dataset, templateVersion, ""
 }
 
@@ -323,6 +335,9 @@ func (h *Handler) TrainingRunCreate(c *gin.Context) {
 	}
 	if req.Queue == "" {
 		req.Queue = "cpu-local"
+		if req.GPUCount > 0 {
+			req.Queue = "gpu-local"
+		}
 	}
 	run := TrainingRun{
 		TenantID: project.TenantID, ProjectID: project.ID, Name: strings.TrimSpace(req.Name),

@@ -1,13 +1,16 @@
 package visionai
 
 import (
+	"context"
 	"encoding/csv"
 	"net/http"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lohasle/nimbus-framework-go/internal/platform/config"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/httpx"
 	"gorm.io/gorm"
 )
@@ -53,6 +56,7 @@ func (h *Handler) ComputeNodeHeartbeat(c *gin.Context) {
 }
 
 func (h *Handler) ResourceOverview(c *gin.Context) {
+	h.refreshLocalDockerGPU(c)
 	var nodes []ComputeNode
 	var queues []ComputeQueue
 	h.db.Where("tenant_id = ?", tenantID(c)).Order("id").Find(&nodes)
@@ -69,6 +73,58 @@ func (h *Handler) ResourceOverview(c *gin.Context) {
 	var storageBytes int64
 	h.db.Model(&Asset{}).Where("tenant_id = ? AND status <> ?", tenantID(c), AssetPurged).Select("COALESCE(SUM(size),0)").Scan(&storageBytes)
 	httpx.OK(c, gin.H{"nodes": nodes, "queues": queues, "activeJobs": activeJobs, "queuedJobs": queuedJobs, "storageBytes": storageBytes})
+}
+
+func (h *Handler) refreshLocalDockerGPU(c *gin.Context) {
+	const nodeKey = "local-docker-gpu-0"
+	var current ComputeNode
+	if h.db.Where("tenant_id = ? AND node_key = ?", tenantID(c), nodeKey).First(&current).Error == nil &&
+		time.Since(current.LastHeartbeatAt) < 30*time.Second {
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 8*time.Second)
+	defer cancel()
+	cfg := config.Load()
+	output, err := exec.CommandContext(
+		ctx, cfg.DockerBinary,
+		"run", "--rm", "--gpus", "all", "--network", "none", "--read-only",
+		"--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+		"nvidia/cuda:12.6.3-base-ubuntu24.04",
+		"nvidia-smi", "--query-gpu=name,memory.total,driver_version", "--format=csv,noheader,nounits",
+	).Output()
+	if err != nil {
+		return
+	}
+	model, memoryBytes, driver, ok := parseGPUProbe(string(output))
+	if !ok {
+		return
+	}
+	now := time.Now()
+	node := ComputeNode{
+		TenantID: tenantID(c), NodeKey: nodeKey, Name: "Local Docker GPU",
+		GPUModel: model, GPUCount: 1, GPUMemoryBytes: memoryBytes,
+		DriverVersion: driver, CUDAVersion: "12.6", Status: "ONLINE",
+		Labels: jsonValue(map[string]any{
+			"runtime": "docker", "discovery": "automatic", "trainer": "LOCAL_DOCKER",
+		}),
+		LastHeartbeatAt: now,
+	}
+	h.db.Where("tenant_id = ? AND node_key = ?", node.TenantID, node.NodeKey).
+		Assign(node).FirstOrCreate(&node)
+}
+
+func parseGPUProbe(output string) (string, int64, string, bool) {
+	line := strings.TrimSpace(strings.Split(output, "\n")[0])
+	fields := strings.Split(line, ",")
+	if len(fields) != 3 {
+		return "", 0, "", false
+	}
+	memoryMiB, err := strconv.ParseInt(strings.TrimSpace(fields[1]), 10, 64)
+	if err != nil || memoryMiB < 1 {
+		return "", 0, "", false
+	}
+	model, driver := strings.TrimSpace(fields[0]), strings.TrimSpace(fields[2])
+	return model, memoryMiB * 1024 * 1024, driver, model != "" && driver != ""
 }
 
 type queueRequest struct {
@@ -164,6 +220,23 @@ func (h *Handler) IntegrationCreate(c *gin.Context) {
 	httpx.OK(c, row)
 }
 
+type integrationTestResult struct {
+	IntegrationInstance
+	Success   bool    `json:"success"`
+	LatencyMS float64 `json:"latencyMs"`
+	Stage     string  `json:"stage"`
+	Message   string  `json:"message"`
+	Target    string  `json:"target"`
+}
+
+// IntegrationTest godoc
+// @Summary Test an integration using its provider-internal health endpoint
+// @Tags VisionAI Operations
+// @Security BearerAuth
+// @Param instanceId path int true "Integration instance ID"
+// @Success 200 {object} httpx.Response
+// @Failure 502 {object} httpx.Response
+// @Router /ai-platform/integrations/{instanceId}/test [post]
 func (h *Handler) IntegrationTest(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("instanceId"), 10, 64)
 	var row IntegrationInstance
@@ -171,33 +244,73 @@ func (h *Handler) IntegrationTest(c *gin.Context) {
 		httpx.Fail(c, 404, 404, "集成实例不存在")
 		return
 	}
-	target := row.BaseURL
-	if row.ProviderType == "CVAT" {
-		target += "/api/server/about"
-	} else {
-		target += "/health"
-	}
+	target := integrationProbeTarget(row, config.Load())
 	client := &http.Client{Timeout: 10 * time.Second}
+	started := time.Now()
 	response, err := client.Get(target)
+	latencyMS := float64(time.Since(started).Microseconds()) / 1000
 	now := time.Now()
 	row.LastCheckedAt = &now
 	if err != nil || response.StatusCode < 200 || response.StatusCode >= 300 {
-		row.Status = "AUTH_FAILED"
+		row.Status = "UNREACHABLE"
+		stage := "NETWORK"
 		if err != nil {
 			row.LastError = err.Error()
 		} else {
 			row.LastError = response.Status
+			stage = "HTTP"
+			if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+				row.Status = "AUTH_FAILED"
+				stage = "AUTHENTICATION"
+			}
 			response.Body.Close()
 		}
 		h.db.Save(&row)
-		h.db.Create(&SyncIncident{TenantID: row.TenantID, InstanceID: row.ID, ResourceType: "INTEGRATION", ResourceID: strconv.FormatUint(row.ID, 10), Code: row.Status, Message: row.LastError, Status: "OPEN"})
-		httpx.Fail(c, 502, 502, "连接测试失败")
+		incident := SyncIncident{
+			TenantID: row.TenantID, InstanceID: row.ID, ResourceType: "INTEGRATION",
+			ResourceID: strconv.FormatUint(row.ID, 10), Code: row.Status, Status: "OPEN",
+		}
+		h.db.Where(
+			"tenant_id = ? AND instance_id = ? AND resource_type = ? AND resource_id = ? AND code = ? AND status = ?",
+			row.TenantID, row.ID, incident.ResourceType, incident.ResourceID, incident.Code, incident.Status,
+		).Assign(map[string]any{"message": row.LastError, "last_attempt_at": now}).FirstOrCreate(&incident)
+		result := integrationTestResult{
+			IntegrationInstance: row, Success: false, LatencyMS: latencyMS,
+			Stage: stage, Message: row.LastError, Target: target,
+		}
+		c.AbortWithStatusJSON(http.StatusBadGateway, httpx.Response{
+			Code: 502, Data: result, Msg: "连接测试失败：" + row.Status,
+		})
 		return
 	}
 	response.Body.Close()
 	row.Status, row.LastError = "HEALTHY", ""
 	h.db.Save(&row)
-	httpx.OK(c, row)
+	h.db.Model(&SyncIncident{}).
+		Where("tenant_id = ? AND instance_id = ? AND resource_type = ? AND status = ?", row.TenantID, row.ID, "INTEGRATION", "OPEN").
+		Updates(map[string]any{"status": "RESOLVED", "resolved_at": now})
+	httpx.OK(c, integrationTestResult{
+		IntegrationInstance: row, Success: true, LatencyMS: latencyMS,
+		Stage: "HEALTH_CHECK", Message: "连接测试通过", Target: target,
+	})
+}
+
+func integrationProbeTarget(row IntegrationInstance, cfg config.Config) string {
+	base := strings.TrimRight(row.BaseURL, "/")
+	switch strings.ToUpper(row.ProviderType) {
+	case "CVAT":
+		if strings.TrimSpace(cfg.CVATBaseURL) != "" {
+			base = strings.TrimRight(cfg.CVATBaseURL, "/")
+		}
+		return base + "/api/server/about"
+	case "FIFTYONE":
+		if strings.TrimSpace(cfg.FiftyOneAPIURL) != "" {
+			base = strings.TrimRight(cfg.FiftyOneAPIURL, "/")
+		}
+		return base + "/health"
+	default:
+		return base + "/health"
+	}
 }
 
 type compatibilityRequest struct {

@@ -1,0 +1,43 @@
+{
+  "executedAt": "2026-07-24T13:33:32.7138120Z",
+  "source": {
+    "name": "COCO128",
+    "url": "https://github.com/ultralytics/assets/releases/download/v0.0.0/coco128.zip",
+    "archiveSha256": "61e5e3028863d8ffc3b81d6a514603954889f0edd5e4b44c4ce60b2da99aeb8e",
+    "images": 128,
+    "yoloLabelFiles": 128,
+    "cvatShapes": 929
+  },
+  "records": {
+    "projectId": 14,
+    "datasetVersionId": 9,
+    "trainingRunId": 6,
+    "evaluationRunId": 9,
+    "modelVersionId": 5,
+    "approvalId": 4,
+    "deploymentId": 5,
+    "feedbackBatchId": 4,
+    "feedbackAnnotationTaskId": 15
+  },
+  "gpuEvidence": {
+    "provider": "LOCAL_DOCKER",
+    "queue": "gpu-local",
+    "gpuCount": 1,
+    "gpuModel": "NVIDIA GeForce RTX 3060",
+    "gpuMemoryBytes": 12884377600,
+    "cudaRuntime": 12090,
+    "inputMode": "staged-dataset",
+    "imageCount": 128,
+    "epochs": 12,
+    "finalLoss": 0.00002474387838447001
+  },
+  "outcome": {
+    "datasetStatus": "FROZEN",
+    "trainingStatus": "SUCCEEDED",
+    "evaluationStatus": "SUCCEEDED",
+    "gateDecision": "PASSED",
+    "deploymentStatus": "RUNNING",
+    "imageRegressionStatus": "PASSED",
+    "feedbackStatus": "READY"
+  }
+}

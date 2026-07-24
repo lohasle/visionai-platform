@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -63,20 +64,39 @@ func processTrainingEvent(ctx context.Context, db *gorm.DB, cfg config.Config, e
 		return failTrainingRun(db, &run, "RESOURCE", "WORK_ROOT_INVALID", err.Error())
 	}
 	runDir := filepath.Join(workRoot, "runs", strconv.FormatUint(run.ID, 10))
+	inputDir := filepath.Join(workRoot, "inputs", strconv.FormatUint(run.ID, 10))
 	relative, err := filepath.Rel(workRoot, runDir)
 	if err != nil || strings.HasPrefix(relative, "..") {
 		return failTrainingRun(db, &run, "RESOURCE", "WORK_ROOT_ESCAPE", "training run directory escapes configured root")
 	}
+	inputRelative, err := filepath.Rel(workRoot, inputDir)
+	if err != nil || strings.HasPrefix(inputRelative, "..") {
+		return failTrainingRun(db, &run, "RESOURCE", "WORK_ROOT_ESCAPE", "training input directory escapes configured root")
+	}
 	var runtimeSpec struct {
 		MemoryBytes int64   `json:"memoryBytes"`
 		CPUs        float64 `json:"cpus"`
+		CPU         float64 `json:"cpu"`
 	}
 	_ = json.Unmarshal([]byte(run.RuntimeSpec), &runtimeSpec)
 	if runtimeSpec.MemoryBytes == 0 {
 		runtimeSpec.MemoryBytes = 1 << 30
 	}
 	if runtimeSpec.CPUs == 0 {
+		runtimeSpec.CPUs = runtimeSpec.CPU
+	}
+	if runtimeSpec.CPUs == 0 {
 		runtimeSpec.CPUs = 1
+	}
+	objectStore, err := storage.NewMinIO(cfg)
+	if err != nil {
+		return failTrainingRun(db, &run, "EXTERNAL_SERVICE", "STORAGE_CONFIG_INVALID", err.Error())
+	}
+	if err = objectStore.EnsureBucket(ctx); err != nil {
+		return failTrainingRun(db, &run, "EXTERNAL_SERVICE", "STORAGE_UNAVAILABLE", err.Error())
+	}
+	if err = stageTrainingDataset(ctx, db, objectStore, &run, dataset, inputDir); err != nil {
+		return failTrainingRun(db, &run, "DATA", "DATASET_STAGE_FAILED", err.Error())
 	}
 	run.Status, run.Progress = TrainingRunning, 20
 	db.Save(&run)
@@ -86,6 +106,7 @@ func processTrainingEvent(ctx context.Context, db *gorm.DB, cfg config.Config, e
 	defer cancel()
 	manifest, log, runErr := (platformtraining.LocalDocker{Binary: cfg.DockerBinary, VolumesFrom: cfg.DockerVolumesFrom}).Run(trainingCtx, platformtraining.LocalDockerSpec{
 		RunID: run.ID, ImageRef: template.ImageRef, Entrypoint: template.Entrypoint, OutputDir: runDir,
+		InputDir:           inputDir,
 		DatasetManifestURI: dataset.ManifestURI, ParametersJSON: run.Parameters, GPUCount: run.GPUCount,
 		MemoryBytes: runtimeSpec.MemoryBytes, CPUs: runtimeSpec.CPUs,
 	})
@@ -98,13 +119,6 @@ func processTrainingEvent(ctx context.Context, db *gorm.DB, cfg config.Config, e
 	db.Save(&run)
 	db.Model(&PlatformJob{}).Where("tenant_id = ? AND resource_type = ? AND resource_id = ?", run.TenantID, "TRAINING_RUN", run.ID).
 		Updates(map[string]any{"stage": "EXPORTING", "progress": 85})
-	objectStore, err := storage.NewMinIO(cfg)
-	if err != nil {
-		return failTrainingRun(db, &run, "EXTERNAL_SERVICE", "STORAGE_CONFIG_INVALID", err.Error())
-	}
-	if err = objectStore.EnsureBucket(ctx); err != nil {
-		return failTrainingRun(db, &run, "EXTERNAL_SERVICE", "STORAGE_UNAVAILABLE", err.Error())
-	}
 	if err = collectTrainingResults(ctx, db, objectStore, &run, runDir, manifest, log); err != nil {
 		return failTrainingRun(db, &run, "FRAMEWORK", "RESULT_MANIFEST_INVALID", err.Error())
 	}
@@ -115,6 +129,92 @@ func processTrainingEvent(ctx context.Context, db *gorm.DB, cfg config.Config, e
 		return err
 	}
 	return finishTrainingJob(db, &run, true, "", "")
+}
+
+func stageTrainingDataset(ctx context.Context, db *gorm.DB, objectStore storage.Provider, run *TrainingRun, dataset DatasetVersion, inputDir string) error {
+	if strings.TrimSpace(dataset.ManifestObjectKey) == "" {
+		return errors.New("frozen dataset manifest object key is missing")
+	}
+	if err := os.MkdirAll(filepath.Join(inputDir, "assets"), 0o755); err != nil {
+		return err
+	}
+	if err := copyTrainingObject(ctx, objectStore, dataset.ManifestObjectKey, filepath.Join(inputDir, "manifest.json")); err != nil {
+		return fmt.Errorf("stage dataset manifest: %w", err)
+	}
+	var items []DatasetVersionItem
+	if err := db.Where(
+		"tenant_id = ? AND project_id = ? AND dataset_version_id = ?",
+		run.TenantID, run.ProjectID, dataset.ID,
+	).Order("id").Find(&items).Error; err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		return errors.New("frozen dataset contains no items")
+	}
+	assetIDs := make([]uint64, 0, len(items))
+	splitByAsset := make(map[uint64]string, len(items))
+	for _, item := range items {
+		assetIDs = append(assetIDs, item.AssetID)
+		splitByAsset[item.AssetID] = item.Split
+	}
+	var assets []Asset
+	if err := db.Where(
+		"tenant_id = ? AND project_id = ? AND id IN ? AND status = ?",
+		run.TenantID, run.ProjectID, assetIDs, AssetReady,
+	).Order("id").Find(&assets).Error; err != nil {
+		return err
+	}
+	if len(assets) != len(items) {
+		return fmt.Errorf("dataset staging expected %d ready assets, found %d", len(items), len(assets))
+	}
+	staged := make([]map[string]any, 0, len(assets))
+	for _, asset := range assets {
+		extension := strings.ToLower(filepath.Ext(asset.Filename))
+		if extension == "" || len(extension) > 10 {
+			extension = ".bin"
+		}
+		filename := strconv.FormatUint(asset.ID, 10) + extension
+		localPath := filepath.Join(inputDir, "assets", filename)
+		if err := copyTrainingObject(ctx, objectStore, asset.ObjectKey, localPath); err != nil {
+			return fmt.Errorf("stage asset %d: %w", asset.ID, err)
+		}
+		staged = append(staged, map[string]any{
+			"assetId": asset.ID, "filename": filename, "sourceFilename": asset.Filename,
+			"split": splitByAsset[asset.ID], "sha256": asset.SHA256,
+			"width": asset.Width, "height": asset.Height, "contentType": asset.ContentType,
+		})
+	}
+	indexRaw, err := json.Marshal(map[string]any{
+		"schemaVersion":    "visionai.training-input.v1",
+		"datasetVersionId": dataset.ID, "datasetChecksum": dataset.Checksum, "items": staged,
+	})
+	if err != nil {
+		return err
+	}
+	if err = os.WriteFile(filepath.Join(inputDir, "staged-index.json"), indexRaw, 0o444); err != nil {
+		return err
+	}
+	_ = os.Chmod(filepath.Join(inputDir, "manifest.json"), 0o444)
+	_ = os.Chmod(filepath.Join(inputDir, "assets"), 0o555)
+	return os.Chmod(inputDir, 0o555)
+}
+
+func copyTrainingObject(ctx context.Context, objectStore storage.Provider, key, destination string) error {
+	source, _, err := objectStore.Get(ctx, key)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+	target, err := os.OpenFile(destination, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o444)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(target, source)
+	closeErr := target.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }
 
 func processClearMLTraining(ctx context.Context, db *gorm.DB, cfg config.Config, run *TrainingRun, template TrainingTemplateVersion, dataset DatasetVersion) error {

@@ -41,14 +41,30 @@
     <el-dialog v-model="suiteVisible" title="新建评估套件" width="580">
       <el-form label-position="top">
         <el-form-item label="名称"><el-input v-model="suiteForm.name" /></el-form-item>
-        <el-form-item label="冻结 DatasetVersion ID"><el-input-number v-model="suiteForm.datasetVersionId" :min="1" /></el-form-item>
+        <el-form-item label="冻结数据集版本">
+          <el-select v-model="suiteForm.datasetVersionId" class="full" placeholder="选择当前项目的 FROZEN 版本">
+            <el-option
+              v-for="version in frozenDatasetVersions"
+              :key="version.id"
+              :label="`${version.datasetName} · ${version.semanticVersion} · ${version.itemCount} 张`"
+              :value="version.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="门禁策略"><el-select v-model="suiteForm.gatePolicy" class="full"><el-option label="必须通过" value="MUST_PASS" /><el-option label="允许回归" value="ALLOW_REGRESSION" /><el-option label="人工审核" value="MANUAL_REVIEW" /></el-select></el-form-item>
         <div class="form-grid"><el-form-item label="mAP 下限"><el-input-number v-model="suiteForm.map" :min="0" :max="1" :step="0.05" /></el-form-item><el-form-item label="Recall 下限"><el-input-number v-model="suiteForm.recall" :min="0" :max="1" :step="0.05" /></el-form-item></div>
       </el-form>
       <template #footer><el-button @click="suiteVisible = false">取消</el-button><el-button type="primary" @click="submitSuite">创建</el-button></template>
     </el-dialog>
     <el-dialog v-model="runVisible" title="运行评估" width="500">
-      <el-form label-position="top"><el-form-item label="成功 TrainingRun ID"><el-input-number v-model="runForm.trainingRunId" :min="1" /></el-form-item><el-form-item label="Baseline Run（可选）"><el-input-number v-model="runForm.baselineRunId" :min="0" /></el-form-item></el-form>
+      <el-form label-position="top">
+        <el-form-item label="成功训练运行">
+          <el-select v-model="runForm.trainingRunId" class="full" placeholder="选择 SUCCEEDED 训练">
+            <el-option v-for="run in succeededTrainingRuns" :key="run.id" :label="`#${run.id} · ${run.name}`" :value="run.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Baseline Run（可选）"><el-input-number v-model="runForm.baselineRunId" :min="0" /></el-form-item>
+      </el-form>
       <template #footer><el-button @click="runVisible = false">取消</el-button><el-button type="primary" @click="submitRun">进入队列</el-button></template>
     </el-dialog>
     <el-drawer v-model="detailVisible" title="评估证据与困难样本" size="65%">
@@ -81,6 +97,8 @@
 <script lang="ts" setup>
 import EmbeddedWorkbench from '@/views/ai-platform/components/EmbeddedWorkbench.vue'
 import { getProjectPage, type Project } from '@/api/ai-platform/projects'
+import { getDatasets, getDatasetVersions, type DatasetVersion } from '@/api/ai-platform/datasets'
+import { getTrainingRuns, type TrainingRun } from '@/api/ai-platform/training'
 import {
   createEvaluationRun, createEvaluationSuite, getEvaluationRun, getEvaluationRuns,
   getEvaluationSuites, openEvaluationWorkbench, type EvaluationMetric, type EvaluationRun,
@@ -94,6 +112,8 @@ const projectId = ref<number>()
 const suites = ref<EvaluationSuite[]>([])
 const selectedSuite = ref<EvaluationSuite>()
 const runs = ref<EvaluationRun[]>([])
+const frozenDatasetVersions = ref<Array<DatasetVersion & { datasetName: string }>>([])
+const succeededTrainingRuns = ref<TrainingRun[]>([])
 const detail = ref<Awaited<ReturnType<typeof getEvaluationRun>>>()
 const suiteVisible = ref(false)
 const runVisible = ref(false)
@@ -103,8 +123,8 @@ const workbenchUrl = ref('')
 const workbenchTitle = ref('FiftyOne 评估工作台')
 const workbenchContext = ref('')
 const activeWorkbenchRunId = ref<number>()
-const suiteForm = reactive({ name: '', datasetVersionId: 3, gatePolicy: 'MUST_PASS', map: 0.5, recall: 0.5 })
-const runForm = reactive({ trainingRunId: 1, baselineRunId: 0 })
+const suiteForm = reactive({ name: '', datasetVersionId: undefined as number | undefined, gatePolicy: 'MUST_PASS', map: 0.5, recall: 0.5 })
+const runForm = reactive({ trainingRunId: undefined as number | undefined, baselineRunId: 0 })
 const passedCount = computed(() => runs.value.filter((run) => run.gateDecision === 'PASSED').length)
 const metricValue = (name: string) => detail.value?.metrics.find((m) => m.name === name)?.value || 0
 const fpCount = computed(() => metricValue('FP'))
@@ -112,12 +132,35 @@ const fnCount = computed(() => metricValue('FN'))
 const primaryMAP = computed(() => metricValue('mAP').toFixed(3))
 const loadAll = async () => {
   if (!projectId.value) return
-  ;[suites.value, runs.value] = await Promise.all([getEvaluationSuites(projectId.value), getEvaluationRuns(projectId.value)])
+  const [suiteRows, evaluationRows, datasetRows, trainingRows] = await Promise.all([
+    getEvaluationSuites(projectId.value),
+    getEvaluationRuns(projectId.value),
+    getDatasets(projectId.value),
+    getTrainingRuns(projectId.value)
+  ])
+  suites.value = suiteRows
+  runs.value = evaluationRows
+  const versionGroups = await Promise.all(
+    datasetRows.map(async (dataset) =>
+      (await getDatasetVersions(projectId.value!, dataset.id))
+        .filter((version) => version.status === 'FROZEN')
+        .map((version) => ({ ...version, datasetName: dataset.name }))
+    )
+  )
+  frozenDatasetVersions.value = versionGroups.flat()
+  succeededTrainingRuns.value = trainingRows.list.filter((run) => run.status === 'SUCCEEDED')
+  if (!frozenDatasetVersions.value.some((version) => version.id === suiteForm.datasetVersionId))
+    suiteForm.datasetVersionId = frozenDatasetVersions.value[0]?.id
+  if (!succeededTrainingRuns.value.some((run) => run.id === runForm.trainingRunId))
+    runForm.trainingRunId = succeededTrainingRuns.value[0]?.id
   selectedSuite.value = suites.value[0]
   if (runs.value[0]?.status === 'SUCCEEDED') detail.value = await getEvaluationRun(projectId.value, runs.value[0].id)
 }
 const submitSuite = async () => {
-  if (!projectId.value || !suiteForm.name.trim()) return
+  if (!projectId.value || !suiteForm.name.trim() || !suiteForm.datasetVersionId) {
+    message.warning('请填写名称并选择冻结数据集版本')
+    return
+  }
   selectedSuite.value = await createEvaluationSuite(projectId.value, {
     name: suiteForm.name, datasetVersionId: suiteForm.datasetVersionId, gatePolicy: suiteForm.gatePolicy,
     slices: ['all', 'small-object', 'occluded', 'dense', 'night', 'low-confidence'],
@@ -127,7 +170,10 @@ const submitSuite = async () => {
   await loadAll()
 }
 const submitRun = async () => {
-  if (!projectId.value || !selectedSuite.value) return
+  if (!projectId.value || !selectedSuite.value || !runForm.trainingRunId) {
+    message.warning('请选择成功训练运行')
+    return
+  }
   await createEvaluationRun(projectId.value, selectedSuite.value.id, runForm)
   runVisible.value = false
   message.success('评估已进入统一任务队列')

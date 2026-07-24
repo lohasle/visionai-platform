@@ -17,6 +17,7 @@ type LocalDockerSpec struct {
 	ImageRef           string
 	Entrypoint         string
 	OutputDir          string
+	InputDir           string
 	DatasetManifestURI string
 	ParametersJSON     string
 	GPUCount           int
@@ -74,6 +75,20 @@ func (p LocalDocker) Run(ctx context.Context, spec LocalDockerSpec) (ResultManif
 	if err = os.Chmod(outputDir, 0o777); err != nil {
 		return ResultManifest{}, nil, err
 	}
+	inputTarget := ""
+	if strings.TrimSpace(spec.InputDir) != "" {
+		inputDir, inputErr := filepath.Abs(spec.InputDir)
+		if inputErr != nil {
+			return ResultManifest{}, nil, inputErr
+		}
+		if info, statErr := os.Stat(inputDir); statErr != nil || !info.IsDir() {
+			return ResultManifest{}, nil, errors.New("training input directory is unavailable")
+		}
+		inputTarget = "/input"
+		if strings.TrimSpace(p.VolumesFrom) != "" {
+			inputTarget = inputDir
+		}
+	}
 	binary := strings.TrimSpace(p.Binary)
 	if binary == "" {
 		binary = "docker"
@@ -89,6 +104,9 @@ func (p LocalDocker) Run(ctx context.Context, spec LocalDockerSpec) (ResultManif
 		outputTarget = outputDir
 	} else {
 		args = append(args, "--mount", "type=bind,src="+outputDir+",dst=/output")
+		if inputTarget != "" {
+			args = append(args, "--mount", "type=bind,src="+spec.InputDir+",dst=/input,readonly")
+		}
 	}
 	args = append(args,
 		"--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
@@ -97,6 +115,9 @@ func (p LocalDocker) Run(ctx context.Context, spec LocalDockerSpec) (ResultManif
 		"-e", "VISIONAI_DATASET_MANIFEST_URI="+spec.DatasetManifestURI,
 		"-e", "VISIONAI_PARAMETERS_JSON="+spec.ParametersJSON,
 	)
+	if inputTarget != "" {
+		args = append(args, "-e", "VISIONAI_INPUT_DIR="+inputTarget)
+	}
 	if spec.MemoryBytes > 0 {
 		args = append(args, "--memory", strconv.FormatInt(spec.MemoryBytes, 10))
 	}

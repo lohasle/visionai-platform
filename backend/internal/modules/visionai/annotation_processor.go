@@ -72,7 +72,17 @@ func markAnnotationFailure(db *gorm.DB, task *AnnotationTask, code string, err e
 func prepareCVATTask(ctx context.Context, db *gorm.DB, provider annotation.Provider, objectStore storage.Provider, task *AnnotationTask) error {
 	var annotatorIDs []uint64
 	if err := json.Unmarshal([]byte(task.AnnotatorIDs), &annotatorIDs); err != nil || len(annotatorIDs) == 0 {
-		return errors.New("annotation task has no valid annotators")
+		var project Project
+		if projectErr := db.Select("owner_user_id").Where(
+			"tenant_id = ? AND id = ?", task.TenantID, task.ProjectID,
+		).First(&project).Error; projectErr != nil || project.OwnerUserID == 0 {
+			return errors.New("annotation task has no valid annotators")
+		}
+		annotatorIDs = []uint64{project.OwnerUserID}
+		task.AnnotatorIDs = jsonValue(annotatorIDs)
+		if saveErr := db.Model(task).Update("annotator_ids", task.AnnotatorIDs).Error; saveErr != nil {
+			return fmt.Errorf("repair annotation task owner assignment: %w", saveErr)
+		}
 	}
 	identities, err := (&Handler{db: db}).ensureCVATIdentities(ctx, task.TenantID, annotatorIDs)
 	if err != nil {
