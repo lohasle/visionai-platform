@@ -1,6 +1,6 @@
 # SPEC-2210 GitHub Pages UI/UX Pro Max 重设计
 
-状态：进行中
+状态：已完成
 
 Linear：LOH-18
 
@@ -34,4 +34,11 @@ GitHub Pages 已具备真实产品截图和全链路内容，但需要更鲜明�
 
 ## 实现与证据
 
-待完成后补充 PR、GitHub Actions、Pages 地址和浏览器验收记录。
+- 设计系统：`design-system/visionai/MASTER.md` 与 `design-system/pages/github-pages.md`。
+- 页面实现：`docs/site/index.html`，19 张真实验收截图全部进入分类证据库。
+- GitHub：PR [#5](https://github.com/lohasle/visionai-platform/pull/5)，CI `verify` 通过。
+- HTML：`npx --yes html-validate docs/site/index.html` 零错误，`git diff --check` 通过。
+- 浏览器：375、768、1024、1440px 均无横向溢出；375px 可见交互目标均不小于 44×44px。
+- 交互：证据筛选、Lightbox 打开、Escape 关闭、焦点进入与回归均通过。
+- 资源：19/19 截图与产品手册 HTTP 200；控制台零错误、零警告；页面无 `????` 或 Unicode 替换字符。
+- 发布地址：https://lohasle.github.io/visionai-platform/
