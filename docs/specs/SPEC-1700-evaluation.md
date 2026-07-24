@@ -14,9 +14,11 @@ Linear：LOH-12
 - MUST_PASS、ALLOW_REGRESSION、MANUAL_REVIEW 三种策略；可指定成功 EvaluationRun 作为基线，执行最大允许回退门禁。
 - 独立 FiftyOne 1.15.0 服务将实际对象存储图片下载到持久卷，创建按租户/项目/运行隔离的持久数据集，写入 GT、预测、IoU、置信度、错误类型和切片字段。
 - FP、FN、低置信度 SavedSlice 与高级工作台访问均经过项目角色授权并写审计。
+- 受控高级工作台以 VisionAI 全屏 iframe 内嵌 FiftyOne，直接载入当前 EvaluationRun 的隔离数据集，并保留运行上下文、刷新、外部打开和返回入口。
 
 ## 验收证据
 
 - E2E-CV-07：EvaluationRun #5 对 100 个真实唯一图片完成评估并同步 FiftyOne 数据集 `tenant-1-project-1-evaluation-5`。
 - 基线 EvaluationRun #1，候选与基线 mAP 差值 0，最大允许回退 0.02，最终门禁 PASSED。
 - 数据库保存 100 条样本、8+ 指标、3 个 SavedSlice；FiftyOne 管理 API 和 App 健康检查通过。
+- 浏览器验收覆盖内嵌数据集、100 个真实样本与字段可见性，截图见 `docs/screenshots/fiftyone-embedded-workbench.png`。

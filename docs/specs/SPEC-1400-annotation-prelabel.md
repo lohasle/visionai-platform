@@ -17,3 +17,5 @@ DRAFT→PREPARING→PREANNOTATING?→READY→ANNOTATING→REVIEWING→APPROVED/R
 - E2E-FAIL-01：CVAT 中断后可恢复，重试不重复创建任务或标注。
 - 打开 CVAT 前校验权限并审计；历史 Revision 不覆盖。
 - 预标注接受/删除/修改/新增率和平均修正时间可追溯。
+- CVAT 通过 VisionAI 全屏工作台 iframe 内嵌，保留任务上下文、刷新、外部打开和返回入口；Traefik 移除上游 `X-Frame-Options: deny`，并以 `frame-ancestors` 仅允许配置的 VisionAI 工作台来源。
+- 浏览器验收：内嵌区域在 CVAT 登录后显示 `visionai` 用户和真实任务列表，截图见 `docs/screenshots/cvat-embedded-workbench.png`。
