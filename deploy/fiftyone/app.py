@@ -2,6 +2,7 @@ import pathlib
 import re
 import threading
 import os
+import urllib.request
 from urllib.parse import urlsplit, urlunsplit
 
 import fiftyone as fo
@@ -16,6 +17,7 @@ ROOT.mkdir(parents=True, exist_ok=True)
 api = FastAPI(title="VisionAI FiftyOne bridge", version="1.0.0")
 session = None
 lock = threading.Lock()
+UI_URL = "http://127.0.0.1:5151"
 
 
 class Detection(BaseModel):
@@ -58,9 +60,48 @@ def labels(values: list[Detection], predictions: bool = False):
     return fo.Detections(detections=rows)
 
 
+def latest_dataset():
+    datasets = [fo.load_dataset(name) for name in fo.list_datasets()]
+    if not datasets:
+        return None
+    return max(
+        datasets,
+        key=lambda dataset: dataset.last_modified_at or dataset.created_at,
+    )
+
+
+def ensure_session(dataset=None):
+    global session
+    if session is None:
+        session = fo.launch_app(
+            dataset,
+            address="0.0.0.0",
+            port=5151,
+            remote=True,
+        )
+    elif dataset is not None:
+        session.dataset = dataset
+    return session
+
+
+def ui_ready():
+    try:
+        with urllib.request.urlopen(UI_URL, timeout=3) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+
 @api.get("/health")
 def health():
-    return {"status": "UP", "fiftyoneVersion": fo.__version__}
+    if not ui_ready():
+        raise HTTPException(503, "FiftyOne App UI is unavailable")
+    return {
+        "status": "UP",
+        "uiStatus": "UP",
+        "fiftyoneVersion": fo.__version__,
+        "dataset": session.dataset.name if session and session.dataset else None,
+    }
 
 
 @api.put("/datasets/{dataset_name}")
@@ -70,6 +111,8 @@ def sync_dataset(dataset_name: str, request: DatasetRequest):
         raise HTTPException(400, "dataset name mismatch")
     with lock:
         if fo.dataset_exists(dataset_name):
+            if session is not None and session.dataset is not None and session.dataset.name == dataset_name:
+                session.dataset = None
             fo.delete_dataset(dataset_name)
         dataset = fo.Dataset(dataset_name, persistent=True)
         media_dir = ROOT / safe_name(dataset_name)
@@ -103,12 +146,11 @@ def sync_dataset(dataset_name: str, request: DatasetRequest):
         dataset.add_samples(result)
         dataset.info = request.metadata
         dataset.save()
-        if session is None:
-            session = fo.launch_app(dataset, address="0.0.0.0", port=5151, remote=True)
-        else:
-            session.dataset = dataset
+        ensure_session(dataset)
         return {"name": dataset.name, "sampleCount": len(dataset)}
 
 
 if __name__ == "__main__":
+    with lock:
+        ensure_session(latest_dataset())
     uvicorn.run(api, host="0.0.0.0", port=5152)
