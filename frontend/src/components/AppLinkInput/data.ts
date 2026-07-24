@@ -180,19 +180,6 @@ export const APP_LINK_GROUP_LIST = [
     ]
   },
   {
-    name: '支付',
-    links: [
-      {
-        name: '充值余额',
-        path: '/pages/pay/recharge'
-      },
-      {
-        name: '充值记录',
-        path: '/pages/pay/recharge-log'
-      }
-    ]
-  },
-  {
     name: '用户中心',
     links: [
       {

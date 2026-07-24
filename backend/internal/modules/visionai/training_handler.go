@@ -191,7 +191,10 @@ func (h *Handler) TrainingTemplateSmoke(c *gin.Context) {
 	runID := uint64(time.Now().UnixNano())
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Minute)
 	defer cancel()
-	manifest, log, err := (platformtraining.LocalDocker{Binary: cfg.DockerBinary}).Run(ctx, platformtraining.LocalDockerSpec{
+	manifest, log, err := (platformtraining.LocalDocker{
+		Binary:      cfg.DockerBinary,
+		VolumesFrom: cfg.DockerVolumesFrom,
+	}).Run(ctx, platformtraining.LocalDockerSpec{
 		RunID: runID, ImageRef: version.ImageRef, Entrypoint: version.Entrypoint,
 		OutputDir:          filepath.Join(cfg.TrainingWorkRoot, "template-smoke", strconv.FormatUint(version.ID, 10)),
 		DatasetManifestURI: "s3://visionai-assets/smoke/dataset-manifest.json", ParametersJSON: "{}",

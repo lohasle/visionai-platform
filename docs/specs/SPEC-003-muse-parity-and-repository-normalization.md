@@ -4,7 +4,7 @@
 
 ## 背景
 
-Nimbus Go 单体已具备 System、Infra、Member、Pay 的当前菜单闭环，但公共认证和工程目录落后于已验证的 `muse-app-go`。
+Nimbus Go 单体已具备 System、Infra 与 VisionAI 当前菜单闭环，但公共认证和工程目录落后于已验证的 `muse-app-go`。
 
 ## 目标
 
@@ -16,8 +16,8 @@ Nimbus Go 单体已具备 System、Infra、Member、Pay 的当前菜单闭环，
 ## 非目标
 
 - 不修改 `nimbus-cloud-framework-go` 或 Java 仓库。
-- 不新增、删除或合并模块。
-- 不移除 Member、Pay。
+- 不新增未经产品设计确认的通用业务模块。
+- 会员与支付已由后续产品边界决策移除。
 - 不引入 PostgreSQL、OpenTelemetry 或新的业务服务进程；主数据库固定为 MySQL。
 - 不迁移当前菜单未开放的 Java 扩展功能。
 
@@ -36,6 +36,6 @@ Nimbus Go 单体已具备 System、Infra、Member、Pay 的当前菜单闭环，
 - 登录返回不同的 Access Token 与 Refresh Token。
 - `/system/auth/refresh-token` 可轮换令牌，错误类型 Token 返回 401。
 - 当前开放菜单无 404 和服务器错误。
-- System 20 个管理页面、Infra 9 个管理页面及 Member、Pay 页面均能完成只读接口冒烟。
+- System、Infra 与 VisionAI 当前开放页面均能完成接口冒烟。
 - `go test ./...`、`make build`、Swagger、前端类型检查、Lint 和生产构建通过。
 - 本地前后端重启后可供人工验收。

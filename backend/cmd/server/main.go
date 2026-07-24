@@ -11,8 +11,6 @@ import (
 
 	_ "github.com/lohasle/nimbus-framework-go/docs"
 	"github.com/lohasle/nimbus-framework-go/internal/modules/infra"
-	"github.com/lohasle/nimbus-framework-go/internal/modules/member"
-	"github.com/lohasle/nimbus-framework-go/internal/modules/pay"
 	"github.com/lohasle/nimbus-framework-go/internal/modules/system"
 	"github.com/lohasle/nimbus-framework-go/internal/modules/visionai"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/config"
@@ -40,22 +38,10 @@ func main() {
 		err = infra.Migrate(db)
 	}
 	if err == nil {
-		err = member.Migrate(db)
-	}
-	if err == nil {
-		err = pay.Migrate(db)
-	}
-	if err == nil {
 		err = visionai.Migrate(db)
 	}
 	if err == nil {
 		err = infra.Seed(db, tenant.ID)
-	}
-	if err == nil {
-		err = member.Seed(db, tenant.ID)
-	}
-	if err == nil {
-		err = pay.Seed(db, tenant.ID)
 	}
 	if err != nil {
 		slog.Error("module database initialization failed", "error", err)

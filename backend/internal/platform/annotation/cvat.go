@@ -171,5 +171,5 @@ func (c *CVAT) PutAnnotations(ctx context.Context, taskID int64, annotations []b
 }
 
 func (c *CVAT) TaskURL(taskID int64) string {
-	return fmt.Sprintf("%s/tasks/%d/jobs", c.publicURL, taskID)
+	return fmt.Sprintf("%s/tasks/%d", c.publicURL, taskID)
 }
