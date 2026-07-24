@@ -856,6 +856,54 @@ const docTemplate = `{
                 "responses": {}
             }
         },
+        "/ai-platform/projects/{id}/deployments/{deploymentId}/predict-image": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "VisionAI Deployment"
+                ],
+                "summary": "Upload an image and run an online regression test",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "JPEG, PNG or WebP image up to 20 MiB",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Expected detection label",
+                        "name": "expectedLabel",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "number",
+                        "description": "Minimum confidence from 0 to 1",
+                        "name": "minimumConfidence",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/ai-platform/projects/{id}/status": {
             "put": {
                 "security": [
@@ -931,6 +979,30 @@ const docTemplate = `{
                 "responses": {}
             }
         },
+        "/ai-platform/projects/{id}/training-runs/{runId}/artifacts/{artifactId}/download": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "VisionAI Training"
+                ],
+                "summary": "Download one training artifact",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    }
+                }
+            }
+        },
         "/ai-platform/projects/{id}/training-runs/{runId}/cancel": {
             "post": {
                 "security": [
@@ -957,6 +1029,30 @@ const docTemplate = `{
                 ],
                 "summary": "Clone a reproducible training configuration",
                 "responses": {}
+            }
+        },
+        "/ai-platform/projects/{id}/training-runs/{runId}/export": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/zip"
+                ],
+                "tags": [
+                    "VisionAI Training"
+                ],
+                "summary": "Export a training run and its artifacts as ZIP",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    }
+                }
             }
         },
         "/ai-platform/projects/{id}/training-template-versions/{templateVersionId}/publish": {
@@ -1222,6 +1318,39 @@ const docTemplate = `{
                         }
                     }
                 }
+            }
+        },
+        "/ai-platform/workbench-sso/cvat": {
+            "get": {
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "VisionAI Workbench"
+                ],
+                "summary": "Exchange a one-time VisionAI ticket for a personal CVAT session",
+                "responses": {}
+            }
+        },
+        "/ai-platform/workbench-sso/fiftyone": {
+            "get": {
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "VisionAI Workbench"
+                ],
+                "summary": "Exchange a one-time VisionAI ticket for a protected FiftyOne session",
+                "responses": {}
+            }
+        },
+        "/ai-platform/workbench-sso/fiftyone/validate": {
+            "get": {
+                "tags": [
+                    "VisionAI Workbench"
+                ],
+                "summary": "Validate a FiftyOne gateway session",
+                "responses": {}
             }
         },
         "/app/health": {

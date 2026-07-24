@@ -4,11 +4,11 @@
       <div>
         <span class="eyebrow">HUMAN IN THE LOOP</span>
         <h1>标注任务</h1>
-        <p>统一编排 CVAT、人员映射、业务审核与不可变标注快照。</p>
+        <p>底座账号自动进入 CVAT，多名标注员并行处理分片，审核与快照全程可追溯。</p>
       </div>
       <div class="actions">
         <el-button @click="mappingVisible = true">
-          <Icon icon="lucide:user-round-cog" :size="16" />人员映射
+          <Icon icon="lucide:users-round" :size="16" />协作身份
         </el-button>
         <el-button type="primary" :disabled="!projectId" @click="createVisible = true">
           <Icon icon="lucide:plus" :size="16" />创建任务
@@ -140,13 +140,47 @@
         </div>
         <el-form-item label="类别（逗号分隔）"><el-input v-model="form.labels" /></el-form-item>
         <div class="form-grid">
-          <el-form-item label="标注员平台用户 ID"
-            ><el-input-number v-model="form.annotatorId" :min="1"
-          /></el-form-item>
-          <el-form-item label="审核员平台用户 ID"
-            ><el-input-number v-model="form.reviewerId" :min="1"
-          /></el-form-item>
+          <el-form-item label="标注员">
+            <el-select
+              v-model="form.annotatorIds"
+              class="full-width"
+              multiple
+              filterable
+              collapse-tags
+              placeholder="选择项目标注员"
+            >
+              <el-option
+                v-for="user in annotatorOptions"
+                :key="user.id"
+                :label="`${user.nickname || user.username} · ${user.username}`"
+                :value="user.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="审核员">
+            <el-select
+              v-model="form.reviewerIds"
+              class="full-width"
+              multiple
+              filterable
+              collapse-tags
+              placeholder="选择项目审核员"
+            >
+              <el-option
+                v-for="user in reviewerOptions"
+                :key="user.id"
+                :label="`${user.nickname || user.username} · ${user.username}`"
+                :value="user.id"
+              />
+            </el-select>
+          </el-form-item>
         </div>
+        <el-alert
+          :closable="false"
+          type="info"
+          show-icon
+          title="账号与权限来自底座；创建任务时自动同步个人 CVAT 身份，并按人员分配 Job。"
+        />
       </el-form>
       <template #footer>
         <el-button @click="createVisible = false">取消</el-button>
@@ -154,9 +188,18 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="mappingVisible" title="CVAT 人员映射" width="600" @open="loadMappings">
+    <el-dialog v-model="mappingVisible" title="CVAT 协作身份" width="680" @open="loadMappings">
+      <el-alert
+        class="identity-tip"
+        :closable="false"
+        type="success"
+        show-icon
+        title="无需维护第二套账号。外部身份由底座用户自动生成，密码不会显示或下发到浏览器。"
+      />
       <el-table :data="mappings">
-        <el-table-column prop="platformUserId" label="平台用户" />
+        <el-table-column label="底座用户" min-width="170">
+          <template #default="{ row }">{{ userLabel(row.platformUserId) }}</template>
+        </el-table-column>
         <el-table-column prop="cvatUserId" label="CVAT ID" />
         <el-table-column prop="cvatUsername" label="CVAT 用户名" />
         <el-table-column label="状态"
@@ -167,10 +210,22 @@
       </el-table>
       <el-divider />
       <div class="mapping-form">
-        <el-input-number v-model="mappingForm.platformUserId" :min="1" controls-position="right" />
-        <el-input-number v-model="mappingForm.cvatUserId" :min="1" controls-position="right" />
-        <el-input v-model="mappingForm.cvatUsername" placeholder="CVAT 用户名" />
-        <el-button type="primary" @click="saveMapping">保存</el-button>
+        <el-select
+          v-model="mappingUserId"
+          class="identity-user-select"
+          filterable
+          placeholder="选择底座用户"
+        >
+          <el-option
+            v-for="user in projectUsers"
+            :key="user.id"
+            :label="`${user.nickname || user.username} · ${user.username}`"
+            :value="user.id"
+          />
+        </el-select>
+        <el-button type="primary" :loading="mappingSaving" @click="saveMapping">
+          同步个人身份
+        </el-button>
       </div>
     </el-dialog>
 
@@ -198,6 +253,8 @@
       :title="workbenchTitle"
       :context="workbenchContext"
       :url="workbenchUrl"
+      @refresh="refreshWorkbench"
+      @open-external="openWorkbenchExternal"
     />
   </main>
 </template>
@@ -222,7 +279,13 @@ import {
   type AssetCollection,
   type CVATUserMapping
 } from '@/api/ai-platform/annotations'
-import { getProjectPage, type Project } from '@/api/ai-platform/projects'
+import {
+  getProjectPage,
+  getProjectMembers,
+  type Project,
+  type ProjectMember
+} from '@/api/ai-platform/projects'
+import { getSimpleUserList, type UserVO } from '@/api/system/user'
 
 defineOptions({ name: 'VisionAIAnnotations' })
 const message = useMessage()
@@ -245,9 +308,12 @@ const projectId = ref<number>()
 const tasks = ref<AnnotationTask[]>([])
 const collections = ref<AssetCollection[]>([])
 const mappings = ref<CVATUserMapping[]>([])
+const members = ref<ProjectMember[]>([])
+const users = ref<UserVO[]>([])
 const total = ref(0)
 const loading = ref(false)
 const saving = ref(false)
+const mappingSaving = ref(false)
 const createVisible = ref(false)
 const mappingVisible = ref(false)
 const detailVisible = ref(false)
@@ -255,6 +321,7 @@ const workbenchVisible = ref(false)
 const workbenchUrl = ref('')
 const workbenchTitle = ref('CVAT 标注工作台')
 const workbenchContext = ref('')
+const activeWorkbenchTask = ref<AnnotationTask>()
 const detail = ref<Awaited<ReturnType<typeof getAnnotationTask>>>()
 const query = reactive({ pageNo: 1, pageSize: 50, status: '' })
 const form = reactive({
@@ -263,11 +330,31 @@ const form = reactive({
   collectionId: undefined as number | undefined,
   ontologyVersion: 'v1',
   labels: 'defect',
-  annotatorId: 1,
-  reviewerId: 1
+  annotatorIds: [] as number[],
+  reviewerIds: [] as number[]
 })
-const mappingForm = reactive({ platformUserId: 1, cvatUserId: 1, cvatUsername: 'visionai' })
+const mappingUserId = ref<number>()
 const frozenCollections = computed(() => collections.value.filter((item) => item.frozen))
+const memberByUser = computed(() => new Map(members.value.map((member) => [member.userId, member])))
+const projectUsers = computed(() => users.value.filter((user) => memberByUser.value.has(user.id)))
+const annotatorOptions = computed(() =>
+  projectUsers.value.filter(
+    (user) =>
+      user.id === projects.value.find((project) => project.id === projectId.value)?.ownerUserId ||
+      memberByUser.value.get(user.id)?.roles.includes('ANNOTATOR')
+  )
+)
+const reviewerOptions = computed(() =>
+  projectUsers.value.filter(
+    (user) =>
+      user.id === projects.value.find((project) => project.id === projectId.value)?.ownerUserId ||
+      memberByUser.value.get(user.id)?.roles.includes('REVIEWER')
+  )
+)
+const userLabel = (userId: number) => {
+  const user = users.value.find((item) => item.id === userId)
+  return user ? `${user.nickname || user.username} · ${user.username}` : `用户 #${userId}`
+}
 const countStatus = (status: AnnotationStatus) =>
   tasks.value.filter((task) => task.status === status).length
 const statusText = (status: AnnotationStatus) =>
@@ -306,14 +393,28 @@ const loadTasks = async () => {
 }
 const loadAll = async () => {
   if (!projectId.value) return
-  const [, collectionRows] = await Promise.all([loadTasks(), getAssetCollections(projectId.value)])
+  const [, collectionRows, memberRows] = await Promise.all([
+    loadTasks(),
+    getAssetCollections(projectId.value),
+    getProjectMembers(projectId.value)
+  ])
   collections.value = collectionRows
+  members.value = memberRows
   form.collectionId = frozenCollections.value[0]?.id
+  form.annotatorIds = annotatorOptions.value.slice(0, 1).map((user) => user.id)
+  form.reviewerIds = reviewerOptions.value.slice(0, 1).map((user) => user.id)
+  mappingUserId.value = projectUsers.value[0]?.id
 }
 const loadMappings = async () => (mappings.value = await getCVATUserMappings())
 const submitCreate = async () => {
-  if (!projectId.value || !form.collectionId || !form.name.trim())
-    return message.warning('请填写任务名称并选择冻结集合')
+  if (
+    !projectId.value ||
+    !form.collectionId ||
+    !form.name.trim() ||
+    !form.annotatorIds.length ||
+    !form.reviewerIds.length
+  )
+    return message.warning('请填写任务名称，选择冻结集合、标注员和审核员')
   saving.value = true
   try {
     await createAnnotationTask(projectId.value, {
@@ -328,8 +429,8 @@ const submitCreate = async () => {
           type: 'rectangle',
           color: ['#ff4d4f', '#1677ff', '#52c41a'][index % 3]
         })),
-      annotatorIds: [form.annotatorId],
-      reviewerIds: [form.reviewerId]
+      annotatorIds: form.annotatorIds,
+      reviewerIds: form.reviewerIds
     })
     createVisible.value = false
     message.success('标注任务草稿已创建')
@@ -370,23 +471,51 @@ const exportSnapshot = async (task: AnnotationTask) => {
   await loadTasks()
 }
 const openWorkbench = async (task: AnnotationTask) => {
+  activeWorkbenchTask.value = task
   const data = await openAnnotationWorkbench(projectId.value!, task.id)
   workbenchUrl.value = data.url
   workbenchTitle.value = task.name
   workbenchContext.value = `VisionAI Task #${task.id} · ${task.taskType} · ${statusText(task.status)}`
   workbenchVisible.value = true
 }
+const refreshWorkbench = async () => {
+  if (!activeWorkbenchTask.value) return
+  const data = await openAnnotationWorkbench(projectId.value!, activeWorkbenchTask.value.id)
+  workbenchUrl.value = data.url
+}
+const openWorkbenchExternal = async () => {
+  if (!activeWorkbenchTask.value) return
+  const popup = window.open('about:blank', '_blank')
+  try {
+    const data = await openAnnotationWorkbench(projectId.value!, activeWorkbenchTask.value.id)
+    if (popup) popup.location.href = data.url
+    else window.open(data.url, '_blank', 'noopener,noreferrer')
+  } catch (error) {
+    popup?.close()
+    throw error
+  }
+}
 const showDetail = async (task: AnnotationTask) => {
   detail.value = await getAnnotationTask(projectId.value!, task.id)
   detailVisible.value = true
 }
 const saveMapping = async () => {
-  await saveCVATUserMapping(mappingForm)
-  message.success('CVAT 人员映射已验证')
-  await loadMappings()
+  if (!mappingUserId.value) return message.warning('请选择底座用户')
+  mappingSaving.value = true
+  try {
+    await saveCVATUserMapping({ platformUserId: mappingUserId.value })
+    message.success('个人 CVAT 身份已同步')
+    await loadMappings()
+  } finally {
+    mappingSaving.value = false
+  }
 }
 onMounted(async () => {
-  const data = await getProjectPage({ pageNo: 1, pageSize: 100 })
+  const [data, userRows] = await Promise.all([
+    getProjectPage({ pageNo: 1, pageSize: 100 }),
+    getSimpleUserList()
+  ])
+  users.value = userRows
   projects.value = data.list
   projectId.value = projects.value[0]?.id
   await loadAll()
@@ -398,7 +527,7 @@ onMounted(async () => {
   min-height: 100%;
   padding: var(--app-content-padding);
   color: var(--text-primary);
-  background: radial-gradient(circle at 92% 4%, rgb(22 119 255 / 8%), transparent 28%);
+  background: var(--el-bg-color-page);
 }
 
 .page-header {
@@ -543,6 +672,14 @@ onMounted(async () => {
 
 .mapping-form > * {
   flex: 1;
+}
+
+.identity-tip {
+  margin-bottom: 16px;
+}
+
+.identity-user-select {
+  min-width: 320px;
 }
 
 code {

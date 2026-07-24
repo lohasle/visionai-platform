@@ -184,8 +184,15 @@ func (h *Handler) EvaluationWorkbench(c *gin.Context) {
 	}
 	_ = appendAudit(h.db, c, project.ID, "FIFTYONE_WORKBENCH_OPENED", "EVALUATION_RUN", run.ID, nil, gin.H{"dataset": run.FiftyOneDataset})
 	cfg := config.Load()
+	target := strings.TrimRight(cfg.FiftyOnePublicURL, "/") + "/?dataset=" + url.QueryEscape(run.FiftyOneDataset)
+	launchURL, err := h.createWorkbenchLaunch("FIFTYONE", project, c.GetUint64("user_id"), "EVALUATION_RUN", run.ID, target)
+	if err != nil {
+		workbenchLaunchError(c, "FiftyOne 工作台授权失败："+err.Error())
+		return
+	}
 	httpx.OK(c, gin.H{
-		"url":     strings.TrimRight(cfg.FiftyOnePublicURL, "/") + "/?dataset=" + url.QueryEscape(run.FiftyOneDataset),
-		"dataset": run.FiftyOneDataset,
+		"url":       launchURL,
+		"dataset":   run.FiftyOneDataset,
+		"expiresIn": int(workbenchTicketTTL.Seconds()),
 	})
 }

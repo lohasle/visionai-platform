@@ -61,6 +61,7 @@ export interface TrainingArtifact {
   uri: string
   sha256: string
   size: number
+  mediaType: string
 }
 
 export interface TrainingMetric {
@@ -141,4 +142,14 @@ export const cloneTrainingRun = (projectId: number, runId: number) =>
   request.post<TrainingRun>({
     url: `/ai-platform/projects/${projectId}/training-runs/${runId}/clone`,
     data: {}
+  })
+
+export const downloadTrainingArtifact = (projectId: number, runId: number, artifactId: number) =>
+  request.download({
+    url: `/ai-platform/projects/${projectId}/training-runs/${runId}/artifacts/${artifactId}/download`
+  })
+
+export const exportTrainingRun = (projectId: number, runId: number) =>
+  request.download({
+    url: `/ai-platform/projects/${projectId}/training-runs/${runId}/export`
   })

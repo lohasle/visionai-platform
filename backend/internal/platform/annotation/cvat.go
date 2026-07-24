@@ -36,9 +36,26 @@ type Task struct {
 	AssigneeID int64  `json:"assignee_id"`
 }
 
+type User struct {
+	ID        int64  `json:"id"`
+	Username  string `json:"username"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	Email     string `json:"email"`
+	Active    bool   `json:"is_active"`
+}
+
+type Job struct {
+	ID       int64  `json:"id"`
+	TaskID   int64  `json:"task_id"`
+	Stage    string `json:"stage"`
+	State    string `json:"state"`
+	Assignee *User  `json:"assignee"`
+}
+
 type Provider interface {
 	About(context.Context) error
-	CreateTask(context.Context, string, []Label) (Task, error)
+	CreateTask(context.Context, string, []Label, int) (Task, error)
 	AttachData(context.Context, int64, []Media) error
 	GetTask(context.Context, int64) (Task, error)
 	GetAnnotations(context.Context, int64) ([]byte, error)
@@ -99,13 +116,16 @@ func (c *CVAT) About(ctx context.Context) error {
 	return err
 }
 
-func (c *CVAT) CreateTask(ctx context.Context, name string, labels []Label) (Task, error) {
+func (c *CVAT) CreateTask(ctx context.Context, name string, labels []Label, segmentSize int) (Task, error) {
 	for index := range labels {
 		if labels[index].Type == "" {
 			labels[index].Type = "rectangle"
 		}
 	}
-	body, _ := json.Marshal(map[string]any{"name": name, "labels": labels, "segment_size": 50})
+	if segmentSize < 1 {
+		segmentSize = 50
+	}
+	body, _ := json.Marshal(map[string]any{"name": name, "labels": labels, "segment_size": segmentSize})
 	resp, err := c.request(ctx, http.MethodPost, "/api/tasks", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return Task{}, err
@@ -172,4 +192,139 @@ func (c *CVAT) PutAnnotations(ctx context.Context, taskID int64, annotations []b
 
 func (c *CVAT) TaskURL(taskID int64) string {
 	return fmt.Sprintf("%s/tasks/%d", c.publicURL, taskID)
+}
+
+func (c *CVAT) JobURL(taskID, jobID int64) string {
+	return fmt.Sprintf("%s/tasks/%d/jobs/%d", c.publicURL, taskID, jobID)
+}
+
+func (c *CVAT) AssignTask(ctx context.Context, taskID, assigneeID int64) error {
+	body, _ := json.Marshal(map[string]int64{"assignee_id": assigneeID})
+	resp, err := c.request(ctx, http.MethodPatch, fmt.Sprintf("/api/tasks/%d", taskID), "application/json", bytes.NewReader(body))
+	if err == nil {
+		resp.Body.Close()
+	}
+	return err
+}
+
+func (c *CVAT) RegisterUser(ctx context.Context, username, email, password, firstName, lastName string) error {
+	body, _ := json.Marshal(map[string]string{
+		"username": username, "email": email, "password1": password, "password2": password,
+		"first_name": firstName, "last_name": lastName,
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/auth/register", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/vnd.cvat+json")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<10))
+		return fmt.Errorf("CVAT register user returned %d: %s", resp.StatusCode, strings.TrimSpace(string(message)))
+	}
+	return nil
+}
+
+func (c *CVAT) FindUser(ctx context.Context, username string) (User, error) {
+	resp, err := c.request(ctx, http.MethodGet, "/api/users?search="+url.QueryEscape(username)+"&page_size=100", "", nil)
+	if err != nil {
+		return User{}, err
+	}
+	defer resp.Body.Close()
+	var page struct {
+		Results []User `json:"results"`
+	}
+	if err = json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		return User{}, err
+	}
+	for _, user := range page.Results {
+		if user.Username == username {
+			return user, nil
+		}
+	}
+	return User{}, fmt.Errorf("CVAT user %q not found", username)
+}
+
+func (c *CVAT) Login(ctx context.Context, username, password string) ([]string, error) {
+	body, _ := json.Marshal(map[string]string{"username": username, "password": password})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/auth/login", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.cvat+json")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<10))
+		return nil, fmt.Errorf("CVAT login returned %d: %s", resp.StatusCode, strings.TrimSpace(string(message)))
+	}
+	cookies := resp.Header.Values("Set-Cookie")
+	if len(cookies) == 0 {
+		return nil, errors.New("CVAT login returned no session cookies")
+	}
+	return cookies, nil
+}
+
+func (c *CVAT) ListTaskJobs(ctx context.Context, taskID int64) ([]Job, error) {
+	resp, err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api/jobs?task_id=%d&page_size=1000", taskID), "", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var page struct {
+		Results []Job `json:"results"`
+	}
+	if err = json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		return nil, err
+	}
+	return page.Results, nil
+}
+
+func (c *CVAT) AssignTaskJobs(ctx context.Context, taskID int64, assigneeIDs []int64) ([]Job, error) {
+	if len(assigneeIDs) == 0 {
+		return nil, errors.New("CVAT job assignment requires at least one assignee")
+	}
+	var jobs []Job
+	var err error
+	for attempt := 0; attempt < 60; attempt++ {
+		jobs, err = c.ListTaskJobs(ctx, taskID)
+		if err == nil && len(jobs) > 0 {
+			break
+		}
+		if err != nil && attempt > 4 {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	if len(jobs) == 0 {
+		return nil, errors.New("CVAT did not create annotation jobs in time")
+	}
+	for index := range jobs {
+		body, _ := json.Marshal(map[string]int64{"assignee": assigneeIDs[index%len(assigneeIDs)]})
+		resp, patchErr := c.request(ctx, http.MethodPatch, fmt.Sprintf("/api/jobs/%d", jobs[index].ID), "application/json", bytes.NewReader(body))
+		if patchErr != nil {
+			return nil, patchErr
+		}
+		var updated Job
+		patchErr = json.NewDecoder(resp.Body).Decode(&updated)
+		resp.Body.Close()
+		if patchErr != nil {
+			return nil, patchErr
+		}
+		jobs[index] = updated
+	}
+	return jobs, nil
 }

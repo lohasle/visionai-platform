@@ -72,6 +72,8 @@
       :title="workbenchTitle"
       :context="workbenchContext"
       :url="workbenchUrl"
+      @refresh="refreshWorkbench"
+      @open-external="openWorkbenchExternal"
     />
   </main>
 </template>
@@ -100,6 +102,7 @@ const workbenchVisible = ref(false)
 const workbenchUrl = ref('')
 const workbenchTitle = ref('FiftyOne 评估工作台')
 const workbenchContext = ref('')
+const activeWorkbenchRunId = ref<number>()
 const suiteForm = reactive({ name: '', datasetVersionId: 3, gatePolicy: 'MUST_PASS', map: 0.5, recall: 0.5 })
 const runForm = reactive({ trainingRunId: 1, baselineRunId: 0 })
 const passedCount = computed(() => runs.value.filter((run) => run.gateDecision === 'PASSED').length)
@@ -142,11 +145,29 @@ const filterSamples = async (name: string) => {
 const workbench = async () => {
   if (!detail.value) return
   const result = await openEvaluationWorkbench(projectId.value!, detail.value.run.id)
+  activeWorkbenchRunId.value = detail.value.run.id
   workbenchUrl.value = result.url
   workbenchTitle.value = `EvaluationRun #${detail.value.run.id}`
   workbenchContext.value = `${result.dataset} · TrainingRun #${detail.value.run.trainingRunId} · ${detail.value.run.gateDecision}`
   workbenchVisible.value = true
   message.success(`已授权并载入数据集 ${result.dataset}`)
+}
+const refreshWorkbench = async () => {
+  if (!activeWorkbenchRunId.value) return
+  const result = await openEvaluationWorkbench(projectId.value!, activeWorkbenchRunId.value)
+  workbenchUrl.value = result.url
+}
+const openWorkbenchExternal = async () => {
+  if (!activeWorkbenchRunId.value) return
+  const popup = window.open('about:blank', '_blank')
+  try {
+    const result = await openEvaluationWorkbench(projectId.value!, activeWorkbenchRunId.value)
+    if (popup) popup.location.href = result.url
+    else window.open(result.url, '_blank', 'noopener,noreferrer')
+  } catch (error) {
+    popup?.close()
+    throw error
+  }
 }
 const formatMetric = (metric: EvaluationMetric) => ['FP', 'FN'].includes(metric.name) ? metric.value : metric.value.toFixed(3)
 onMounted(async () => {
@@ -158,29 +179,162 @@ onMounted(async () => {
 </script>
 
 <style scoped lang="scss">
-.evaluation-page { min-height: 100%; padding: var(--app-content-padding); color: var(--text-primary); background: linear-gradient(145deg, rgb(22 119 255 / 6%), transparent 38%); }
-.page-header, .toolbar, .run-card { display: flex; align-items: center; justify-content: space-between; }
-.page-header { margin-bottom: 22px; }
-.page-header h1 { margin: 5px 0; font-size: 30px; }
-.page-header p { margin: 0; color: var(--text-secondary); }
-.eyebrow { font-size: 12px; font-weight: 750; letter-spacing: 1.8px; color: var(--el-color-primary); }
-.toolbar { justify-content: flex-start; gap: 12px; margin-bottom: 18px; }
-.toolbar .el-select { width: 260px; }
-.summary-grid, .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
-.summary-grid article, .metric-grid article, aside, .run-card { padding: 16px; background: var(--el-bg-color); border: 1px solid var(--el-border-color-lighter); border-radius: 13px; }
-.summary-grid article, .metric-grid article { display: flex; flex-direction: column; gap: 3px; }
-.summary-grid strong, .metric-grid strong { font-size: 25px; }
-.summary-grid span, .summary-grid small, .metric-grid small, aside span, aside small, .run-card span, .run-card p { font-size: 12px; color: var(--text-secondary); }
-.content-grid { display: grid; grid-template-columns: 310px minmax(0, 1fr); gap: 18px; }
-aside { display: flex; flex-direction: column; gap: 8px; }
-aside header, aside button, .run-card div { display: flex; flex-direction: column; gap: 4px; }
-aside button { padding: 14px; text-align: left; cursor: pointer; background: transparent; border: 1px solid var(--el-border-color-lighter); border-radius: 9px; }
-aside button.active { border-color: var(--el-color-primary); }
-.run-list { display: flex; flex-direction: column; gap: 10px; }
-.run-card { cursor: pointer; }
-.run-card p { margin: 0; }
-.full { width: 100%; }
-.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.slice-row { display: flex; gap: 9px; margin-bottom: 15px; flex-wrap: wrap; }
-.empty-state { padding: 70px; text-align: center; color: var(--text-secondary); border: 1px dashed var(--el-border-color); border-radius: 12px; }
+.evaluation-page {
+  min-height: 100%;
+  padding: var(--app-content-padding);
+  color: var(--text-primary);
+  background: linear-gradient(145deg, rgb(22 119 255 / 6%), transparent 38%);
+}
+
+.page-header,
+.toolbar,
+.run-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.page-header {
+  margin-bottom: 22px;
+}
+
+.page-header h1 {
+  margin: 5px 0;
+  font-size: 30px;
+}
+
+.page-header p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.eyebrow {
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 1.8px;
+  color: var(--el-color-primary);
+}
+
+.toolbar {
+  justify-content: flex-start;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.toolbar .el-select {
+  width: 260px;
+}
+
+.summary-grid,
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.summary-grid article,
+.metric-grid article,
+aside,
+.run-card {
+  padding: 16px;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 13px;
+}
+
+.summary-grid article,
+.metric-grid article {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.summary-grid strong,
+.metric-grid strong {
+  font-size: 25px;
+}
+
+.summary-grid span,
+.summary-grid small,
+.metric-grid small,
+aside span,
+aside small,
+.run-card span,
+.run-card p {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: 310px minmax(0, 1fr);
+  gap: 18px;
+}
+
+aside {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+aside header,
+aside button,
+.run-card div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+aside button {
+  padding: 14px;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 9px;
+}
+
+aside button.active {
+  border-color: var(--el-color-primary);
+}
+
+.run-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.run-card {
+  cursor: pointer;
+}
+
+.run-card p {
+  margin: 0;
+}
+
+.full {
+  width: 100%;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.slice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-bottom: 15px;
+}
+
+.empty-state {
+  padding: 70px;
+  color: var(--text-secondary);
+  text-align: center;
+  border: 1px dashed var(--el-border-color);
+  border-radius: 12px;
+}
 </style>

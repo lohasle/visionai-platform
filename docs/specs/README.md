@@ -18,5 +18,6 @@
 | [SPEC-2100](SPEC-2100-resource-integration.md) | 资源中心、集成服务与系统审计 | 已完成（Linear LOH-16） |
 | [SPEC-2200](SPEC-2200-delivery-release.md) | Compose、跨平台验收、文档与发布 | 已完成（Linear LOH-17） |
 | [SPEC-2210](SPEC-2210-github-pages-uiux-promax.md) | GitHub Pages UI/UX Pro Max 重设计 | 已完成（Linear LOH-18） |
+| [SPEC-2220](SPEC-2220-artifact-export-inference-regression-ux.md) | 训练产物导出、推理回归测试与产品体验完善 | 进行中（Linear LOH-19） |
 
 SPEC 状态必须以自动化测试和实际运行验收为依据。

@@ -12,21 +12,40 @@
     </header>
 
     <section class="toolbar">
-      <el-select v-model="projectId" placeholder="选择项目" @change="loadAll">
-        <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
+      <el-select v-model="projectId" placeholder="选择项目" @change="() => loadAll()">
+        <el-option
+          v-for="project in projects"
+          :key="project.id"
+          :label="project.name"
+          :value="project.id"
+        />
       </el-select>
-      <el-button @click="loadAll"><Icon icon="lucide:refresh-cw" :size="15" />刷新</el-button>
+      <el-button :loading="loading" @click="() => loadAll()"
+        ><Icon icon="lucide:refresh-cw" :size="15" />刷新</el-button
+      >
       <el-button @click="templateVisible = true">新建训练模板</el-button>
     </section>
 
     <section class="summary-grid">
-      <article><small>模板</small><strong>{{ templates.length }}</strong><span>版本化 Trainer 契约</span></article>
-      <article><small>运行中</small><strong>{{ activeRuns }}</strong><span>队列与资源状态可见</span></article>
-      <article><small>成功</small><strong>{{ succeededRuns }}</strong><span>模型、日志与环境锁已归档</span></article>
-      <article><small>失败</small><strong>{{ failedRuns }}</strong><span>结构化错误可重试</span></article>
+      <article
+        ><small>模板</small><strong>{{ templates.length }}</strong
+        ><span>版本化 Trainer 契约</span></article
+      >
+      <article
+        ><small>运行中</small><strong>{{ activeRuns }}</strong
+        ><span>队列与资源状态可见</span></article
+      >
+      <article
+        ><small>成功</small><strong>{{ succeededRuns }}</strong
+        ><span>模型、日志与环境锁已归档</span></article
+      >
+      <article
+        ><small>失败</small><strong>{{ failedRuns }}</strong
+        ><span>结构化错误可重试</span></article
+      >
     </section>
 
-    <section class="workspace">
+    <section v-loading="loading" class="workspace">
       <aside>
         <header><b>训练模板</b><span>先冒烟，再发布</span></header>
         <button
@@ -40,87 +59,213 @@
           <strong>{{ template.name }}</strong>
           <small>{{ template.versionCount }} 个版本 · {{ template.publishedCount }} 已发布</small>
         </button>
-        <el-button v-if="selectedTemplate" class="new-version" @click="versionVisible = true">创建不可变版本</el-button>
+        <el-button v-if="selectedTemplate" class="new-version" @click="versionVisible = true"
+          >创建不可变版本</el-button
+        >
       </aside>
 
       <section class="runs">
-        <header><div><h2>实验运行</h2><p>Provider、队列、优先级和执行阶段统一观测。</p></div></header>
+        <header
+          ><div><h2>实验运行</h2><p>Provider、队列、优先级和执行阶段统一观测。</p></div></header
+        >
         <article v-for="run in runs" :key="run.id" class="run-card">
           <div class="run-head">
-            <div><b>{{ run.name }}</b><span>#{{ run.id }} · {{ run.provider }} / {{ run.queue }}</span></div>
-            <el-tag :type="statusType(run.status)">{{ run.status }}</el-tag>
+            <div
+              ><b>{{ run.name }}</b
+              ><span>#{{ run.id }} · {{ run.provider }} / {{ run.queue }}</span></div
+            >
+            <el-tag :type="statusType(run.status)">{{ statusLabel(run.status) }}</el-tag>
           </div>
-          <el-progress :percentage="run.progress" :status="run.status === 'FAILED' ? 'exception' : run.status === 'SUCCEEDED' ? 'success' : undefined" />
+          <el-progress
+            :percentage="run.progress"
+            :status="
+              run.status === 'FAILED'
+                ? 'exception'
+                : run.status === 'SUCCEEDED'
+                  ? 'success'
+                  : undefined
+            "
+          />
           <div class="run-meta">
             <span>DatasetVersion #{{ run.datasetVersionId }}</span>
             <span>TemplateVersion #{{ run.templateVersionId }}</span>
             <span>{{ run.gpuCount ? `${run.gpuCount} GPU` : 'CPU' }}</span>
           </div>
-          <p v-if="run.errorCode" class="error">{{ run.errorCategory }} / {{ run.errorCode }} · {{ run.errorMessage }}</p>
+          <p v-if="run.errorCode" class="error"
+            >{{ run.errorCategory }} / {{ run.errorCode }} · {{ run.errorMessage }}</p
+          >
           <div class="run-actions">
             <el-button link type="primary" @click="showRun(run)">指标与产物</el-button>
-            <el-button v-if="isActive(run.status)" link type="danger" @click="cancelRun(run)">取消</el-button>
-            <el-button v-if="run.status === 'SUCCEEDED' || run.status === 'FAILED'" link @click="cloneRun(run)">克隆配置</el-button>
+            <el-button
+              v-if="run.status === 'SUCCEEDED'"
+              link
+              :loading="exportingRunId === run.id"
+              @click="exportRun(run)"
+            >
+              导出训练包
+            </el-button>
+            <el-button v-if="isActive(run.status)" link type="danger" @click="cancelRun(run)"
+              >取消</el-button
+            >
+            <el-button
+              v-if="run.status === 'SUCCEEDED' || run.status === 'FAILED'"
+              link
+              @click="cloneRun(run)"
+              >克隆配置</el-button
+            >
           </div>
         </article>
-        <div v-if="!runs.length" class="empty-state">暂无训练运行，先发布模板并选择冻结数据集。</div>
+        <div v-if="!runs.length" class="empty-state"
+          >暂无训练运行，先发布模板并选择冻结数据集。</div
+        >
       </section>
     </section>
 
     <el-dialog v-model="templateVisible" title="新建训练模板" width="520">
       <el-form label-position="top">
         <el-form-item label="名称"><el-input v-model="templateForm.name" /></el-form-item>
-        <el-form-item label="AI 类型"><el-select v-model="templateForm.aiType" class="full"><el-option label="目标检测" value="CV_DETECTION" /></el-select></el-form-item>
-        <el-form-item label="说明"><el-input v-model="templateForm.description" type="textarea" /></el-form-item>
+        <el-form-item label="AI 类型"
+          ><el-select v-model="templateForm.aiType" class="full"
+            ><el-option label="目标检测" value="CV_DETECTION" /></el-select
+        ></el-form-item>
+        <el-form-item label="说明"
+          ><el-input v-model="templateForm.description" type="textarea"
+        /></el-form-item>
       </el-form>
-      <template #footer><el-button @click="templateVisible = false">取消</el-button><el-button type="primary" @click="submitTemplate">创建</el-button></template>
+      <template #footer
+        ><el-button @click="templateVisible = false">取消</el-button
+        ><el-button type="primary" :loading="submitting" @click="submitTemplate"
+          >创建</el-button
+        ></template
+      >
     </el-dialog>
 
     <el-dialog v-model="versionVisible" title="创建不可变模板版本" width="650">
-      <el-alert type="info" :closable="false" title="镜像必须固定到 sha256；版本通过最小训练冒烟后才能发布。" />
+      <el-alert
+        type="info"
+        :closable="false"
+        title="镜像必须固定到 sha256；版本通过最小训练冒烟后才能发布。"
+      />
       <el-form label-position="top" class="dialog-form">
         <el-form-item label="Trainer"><el-input v-model="versionForm.trainer" /></el-form-item>
         <el-form-item label="镜像 sha256"><el-input v-model="versionForm.imageRef" /></el-form-item>
-        <el-form-item label="Entrypoint（留空使用镜像默认值）"><el-input v-model="versionForm.entrypoint" /></el-form-item>
+        <el-form-item label="Entrypoint（留空使用镜像默认值）"
+          ><el-input v-model="versionForm.entrypoint"
+        /></el-form-item>
       </el-form>
-      <template #footer><el-button @click="versionVisible = false">取消</el-button><el-button type="primary" @click="submitVersion">创建并冒烟</el-button></template>
+      <template #footer
+        ><el-button @click="versionVisible = false">取消</el-button
+        ><el-button type="primary" :loading="submitting" @click="submitVersion"
+          >创建并冒烟</el-button
+        ></template
+      >
     </el-dialog>
 
     <el-dialog v-model="runVisible" title="发起可复现训练" width="620">
       <el-form label-position="top">
         <el-form-item label="实验名称"><el-input v-model="runForm.name" /></el-form-item>
         <div class="form-grid">
-          <el-form-item label="冻结 DatasetVersion ID"><el-input-number v-model="runForm.datasetVersionId" :min="1" /></el-form-item>
+          <el-form-item label="冻结 DatasetVersion ID"
+            ><el-input-number v-model="runForm.datasetVersionId" :min="1"
+          /></el-form-item>
           <el-form-item label="已发布 TemplateVersion">
             <el-select v-model="runForm.templateVersionId" class="full">
-              <el-option v-for="version in publishedVersions" :key="version.id" :label="`${version.semanticVersion} · ${version.trainer}`" :value="version.id" />
+              <el-option
+                v-for="version in publishedVersions"
+                :key="version.id"
+                :label="`${version.semanticVersion} · ${version.trainer}`"
+                :value="version.id"
+              />
             </el-select>
           </el-form-item>
         </div>
         <div class="form-grid">
-          <el-form-item label="Provider"><el-select v-model="runForm.provider" class="full"><el-option label="LocalDocker" value="LOCAL_DOCKER" /><el-option label="ClearML" value="CLEARML" /></el-select></el-form-item>
+          <el-form-item label="Provider"
+            ><el-select v-model="runForm.provider" class="full"
+              ><el-option label="LocalDocker" value="LOCAL_DOCKER" /><el-option
+                label="ClearML"
+                value="CLEARML" /></el-select
+          ></el-form-item>
           <el-form-item label="队列"><el-input v-model="runForm.queue" /></el-form-item>
         </div>
       </el-form>
-      <template #footer><el-button @click="runVisible = false">取消</el-button><el-button type="primary" @click="submitRun">进入队列</el-button></template>
+      <template #footer
+        ><el-button @click="runVisible = false">取消</el-button
+        ><el-button type="primary" :loading="submitting" @click="submitRun"
+          >进入队列</el-button
+        ></template
+      >
     </el-dialog>
 
-    <el-drawer v-model="detailVisible" title="指标、日志与产物" size="55%">
+    <el-drawer v-model="detailVisible" size="55%">
+      <template #header>
+        <div class="drawer-header">
+          <div
+            ><strong>指标、日志与产物</strong
+            ><span v-if="runDetail">训练运行 #{{ runDetail.run.id }}</span></div
+          >
+          <el-button
+            v-if="runDetail?.run.status === 'SUCCEEDED'"
+            type="primary"
+            :loading="exportingRunId === runDetail.run.id"
+            @click="exportRun(runDetail.run)"
+          >
+            <Icon icon="lucide:package-down" :size="16" />导出全部
+          </el-button>
+        </div>
+      </template>
       <template v-if="runDetail">
         <section class="detail-summary">
-          <article><small>状态</small><strong>{{ runDetail.run.status }}</strong></article>
-          <article><small>指标点</small><strong>{{ runDetail.metrics.length }}</strong></article>
-          <article><small>归档产物</small><strong>{{ runDetail.artifacts.length }}</strong></article>
+          <article
+            ><small>状态</small><strong>{{ statusLabel(runDetail.run.status) }}</strong></article
+          >
+          <article
+            ><small>指标点</small><strong>{{ runDetail.metrics.length }}</strong></article
+          >
+          <article
+            ><small>归档产物</small><strong>{{ runDetail.artifacts.length }}</strong></article
+          >
         </section>
-        <el-table :data="runDetail.metrics">
+        <el-table :data="runDetail.metrics" empty-text="该运行暂无指标记录">
           <el-table-column prop="name" label="指标" />
           <el-table-column prop="step" label="Step" width="100" />
           <el-table-column prop="value" label="值" width="140" />
         </el-table>
-        <el-table :data="runDetail.artifacts" class="artifact-table">
+        <el-table
+          :data="runDetail.artifacts"
+          class="artifact-table"
+          empty-text="该运行暂无归档产物"
+        >
           <el-table-column prop="kind" label="类型" width="160" />
           <el-table-column prop="name" label="名称" />
-          <el-table-column prop="sha256" label="SHA-256" />
+          <el-table-column label="大小" width="110"
+            ><template #default="{ row }">{{ formatBytes(row.size) }}</template></el-table-column
+          >
+          <el-table-column prop="sha256" label="SHA-256"
+            ><template #default="{ row }"
+              ><code>{{ row.sha256.slice(0, 12) }}…</code></template
+            ></el-table-column
+          >
+          <el-table-column label="操作" width="100" align="right">
+            <template #default="{ row }">
+              <el-tooltip
+                :disabled="isDownloadable(row.uri)"
+                content="外部 Provider 产物需在对应训练服务中下载"
+              >
+                <span>
+                  <el-button
+                    link
+                    type="primary"
+                    :disabled="!isDownloadable(row.uri)"
+                    :loading="downloadingArtifactId === row.id"
+                    @click="downloadArtifact(runDetail!.run, row)"
+                  >
+                    下载
+                  </el-button>
+                </span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
         </el-table>
       </template>
     </el-drawer>
@@ -135,6 +280,8 @@ import {
   createTrainingRun,
   createTrainingTemplate,
   createTrainingTemplateVersion,
+  downloadTrainingArtifact,
+  exportTrainingRun,
   getTrainingRun,
   getTrainingRuns,
   getTrainingTemplates,
@@ -142,10 +289,13 @@ import {
   publishTrainingTemplateVersion,
   smokeTrainingTemplateVersion,
   type TrainingRun,
+  type TrainingArtifact,
   type TrainingStatus,
   type TrainingTemplate,
   type TrainingTemplateVersion
 } from '@/api/ai-platform/training'
+import download from '@/utils/download'
+import { downloadByData } from '@/utils/filt'
 
 defineOptions({ name: 'VisionAITraining' })
 const message = useMessage()
@@ -160,21 +310,79 @@ const versionVisible = ref(false)
 const runVisible = ref(false)
 const detailVisible = ref(false)
 const runDetail = ref<Awaited<ReturnType<typeof getTrainingRun>>>()
+const loading = ref(false)
+const submitting = ref(false)
+const exportingRunId = ref<number>()
+const downloadingArtifactId = ref<number>()
+let pollTimer: number | undefined
 const templateForm = reactive({ name: '', aiType: 'CV_DETECTION', description: '' })
 const versionForm = reactive({ trainer: 'LocalDockerSmoke', imageRef: '', entrypoint: '' })
-const runForm = reactive({ name: '', datasetVersionId: 1, templateVersionId: undefined as number | undefined, provider: 'LOCAL_DOCKER', queue: 'cpu-local' })
+const runForm = reactive({
+  name: '',
+  datasetVersionId: 1,
+  templateVersionId: undefined as number | undefined,
+  provider: 'LOCAL_DOCKER',
+  queue: 'cpu-local'
+})
 const publishedVersions = computed(() => versions.value.filter((item) => item.published))
 const activeRuns = computed(() => runs.value.filter((item) => isActive(item.status)).length)
-const succeededRuns = computed(() => runs.value.filter((item) => item.status === 'SUCCEEDED').length)
-const failedRuns = computed(() => runs.value.filter((item) => item.status === 'FAILED' || item.status === 'TIMEOUT').length)
-const isActive = (status: TrainingStatus) => ['QUEUED', 'ALLOCATING', 'RUNNING', 'EXPORTING'].includes(status)
-const statusType = (status: TrainingStatus) => status === 'SUCCEEDED' ? 'success' : status === 'FAILED' || status === 'TIMEOUT' ? 'danger' : status === 'CANCELLED' ? 'info' : 'warning'
-const loadAll = async () => {
+const succeededRuns = computed(
+  () => runs.value.filter((item) => item.status === 'SUCCEEDED').length
+)
+const failedRuns = computed(
+  () => runs.value.filter((item) => item.status === 'FAILED' || item.status === 'TIMEOUT').length
+)
+const isActive = (status: TrainingStatus) =>
+  ['QUEUED', 'ALLOCATING', 'RUNNING', 'EXPORTING'].includes(status)
+const statusType = (status: TrainingStatus) =>
+  status === 'SUCCEEDED'
+    ? 'success'
+    : status === 'FAILED' || status === 'TIMEOUT'
+      ? 'danger'
+      : status === 'CANCELLED'
+        ? 'info'
+        : 'warning'
+const statusLabel = (status: TrainingStatus) =>
+  ({
+    DRAFT: '草稿',
+    QUEUED: '排队中',
+    ALLOCATING: '分配资源',
+    RUNNING: '训练中',
+    EXPORTING: '归集产物',
+    SUCCEEDED: '已完成',
+    FAILED: '失败',
+    CANCELLED: '已取消',
+    TIMEOUT: '已超时'
+  })[status]
+const formatBytes = (bytes: number) => {
+  if (!bytes) return '0 B'
+  const units = ['B', 'KiB', 'MiB', 'GiB']
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  return `${(bytes / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`
+}
+const isDownloadable = (uri: string) => uri.startsWith('s3://')
+const loadAll = async (background = false) => {
   if (!projectId.value) return
-  const [templateRows, runRows] = await Promise.all([getTrainingTemplates(projectId.value), getTrainingRuns(projectId.value)])
-  templates.value = templateRows
-  runs.value = runRows.list
-  if (templates.value[0]) await selectTemplate(templates.value[0])
+  if (!background) loading.value = true
+  try {
+    const selectedId = selectedTemplate.value?.id
+    const [templateRows, runRows] = await Promise.all([
+      getTrainingTemplates(projectId.value),
+      getTrainingRuns(projectId.value)
+    ])
+    templates.value = templateRows
+    runs.value = runRows.list
+    const nextTemplate =
+      templates.value.find((item) => item.id === selectedId) || templates.value[0]
+    if (nextTemplate && nextTemplate.id !== selectedTemplate.value?.id)
+      await selectTemplate(nextTemplate)
+    if (!nextTemplate) {
+      selectedTemplate.value = undefined
+      versions.value = []
+    }
+  } finally {
+    if (!background) loading.value = false
+  }
 }
 const selectTemplate = async (template: TrainingTemplate) => {
   selectedTemplate.value = template
@@ -182,45 +390,71 @@ const selectTemplate = async (template: TrainingTemplate) => {
   runForm.templateVersionId = publishedVersions.value[0]?.id
 }
 const submitTemplate = async () => {
-  if (!projectId.value || !templateForm.name.trim()) return
-  const template = await createTrainingTemplate(projectId.value, templateForm)
-  templateVisible.value = false
-  await loadAll()
-  await selectTemplate(template)
+  if (!projectId.value || !templateForm.name.trim()) {
+    message.warning('请填写训练模板名称')
+    return
+  }
+  submitting.value = true
+  try {
+    const template = await createTrainingTemplate(projectId.value, templateForm)
+    templateVisible.value = false
+    await loadAll()
+    await selectTemplate(template)
+    message.success('训练模板已创建')
+  } finally {
+    submitting.value = false
+  }
 }
 const submitVersion = async () => {
   if (!projectId.value || !selectedTemplate.value || !versionForm.imageRef.startsWith('sha256:')) {
     message.warning('请输入完整 sha256 镜像引用')
     return
   }
-  const version = await createTrainingTemplateVersion(projectId.value, selectedTemplate.value.id, {
-    ...versionForm,
-    outputProtocol: 'visionai.result-manifest.v1',
-    parameterSchema: { type: 'object', additionalProperties: true },
-    resourceRequirements: { cpu: 1, memoryBytes: 536870912, gpuMax: 8 },
-    compatibility: { taskTypes: ['CV_DETECTION'] },
-    licensePolicy: { allowed: true }
-  })
-  message.info('正在运行隔离的 CPU 最小训练冒烟…')
-  await smokeTrainingTemplateVersion(projectId.value, version.id)
-  await publishTrainingTemplateVersion(projectId.value, version.id)
-  versionVisible.value = false
-  message.success('模板冒烟通过并已发布')
-  await loadAll()
+  submitting.value = true
+  try {
+    const version = await createTrainingTemplateVersion(
+      projectId.value,
+      selectedTemplate.value.id,
+      {
+        ...versionForm,
+        outputProtocol: 'visionai.result-manifest.v1',
+        parameterSchema: { type: 'object', additionalProperties: true },
+        resourceRequirements: { cpu: 1, memoryBytes: 536870912, gpuMax: 8 },
+        compatibility: { taskTypes: ['CV_DETECTION'] },
+        licensePolicy: { allowed: true }
+      }
+    )
+    message.info('正在运行隔离的 CPU 最小训练冒烟…')
+    await smokeTrainingTemplateVersion(projectId.value, version.id)
+    await publishTrainingTemplateVersion(projectId.value, version.id)
+    versionVisible.value = false
+    message.success('模板冒烟通过并已发布')
+    await loadAll()
+  } finally {
+    submitting.value = false
+  }
 }
 const submitRun = async () => {
-  if (!projectId.value || !runForm.name.trim() || !runForm.templateVersionId) return
-  await createTrainingRun(projectId.value, {
-    ...runForm,
-    gpuCount: 0,
-    priority: 50,
-    parameters: {},
-    runtimeSpec: { cpu: 1, memoryBytes: 536870912 },
-    codeCommit: 'local-acceptance'
-  })
-  runVisible.value = false
-  message.success('训练已进入统一任务队列')
-  await loadAll()
+  if (!projectId.value || !runForm.name.trim() || !runForm.templateVersionId) {
+    message.warning('请填写实验名称并选择已发布模板版本')
+    return
+  }
+  submitting.value = true
+  try {
+    await createTrainingRun(projectId.value, {
+      ...runForm,
+      gpuCount: 0,
+      priority: 50,
+      parameters: {},
+      runtimeSpec: { cpu: 1, memoryBytes: 536870912 },
+      codeCommit: 'local-acceptance'
+    })
+    runVisible.value = false
+    message.success('训练已进入统一任务队列')
+    await loadAll()
+  } finally {
+    submitting.value = false
+  }
 }
 const showRun = async (run: TrainingRun) => {
   runDetail.value = await getTrainingRun(projectId.value!, run.id)
@@ -235,50 +469,284 @@ const cloneRun = async (run: TrainingRun) => {
   message.success('已克隆为 DRAFT 配置')
   await loadAll()
 }
+const downloadArtifact = async (run: TrainingRun, artifact: TrainingArtifact) => {
+  if (!projectId.value || !isDownloadable(artifact.uri)) return
+  downloadingArtifactId.value = artifact.id
+  try {
+    const data = await downloadTrainingArtifact(projectId.value, run.id, artifact.id)
+    downloadByData(data, artifact.name, artifact.mediaType || 'application/octet-stream')
+    message.success(`已下载 ${artifact.name}`)
+  } finally {
+    downloadingArtifactId.value = undefined
+  }
+}
+const exportRun = async (run: TrainingRun) => {
+  if (!projectId.value) return
+  exportingRunId.value = run.id
+  try {
+    const data = await exportTrainingRun(projectId.value, run.id)
+    download.zip(data, `training-run-${run.id}-export.zip`)
+    message.success('训练运行导出完成')
+  } finally {
+    exportingRunId.value = undefined
+  }
+}
 onMounted(async () => {
   const data = await getProjectPage({ pageNo: 1, pageSize: 100 })
   projects.value = data.list
   projectId.value = projects.value[0]?.id
   await loadAll()
-  window.setInterval(() => projectId.value && loadAll(), 5000)
+  pollTimer = window.setInterval(() => projectId.value && loadAll(true), 5000)
+})
+onBeforeUnmount(() => {
+  if (pollTimer) window.clearInterval(pollTimer)
 })
 </script>
 
 <style scoped lang="scss">
-.training-page { min-height: 100%; padding: var(--app-content-padding); color: var(--text-primary); background: radial-gradient(circle at 85% 0, rgb(104 86 255 / 10%), transparent 35%); }
-.page-header, .toolbar, .run-head, .runs > header { display: flex; align-items: center; justify-content: space-between; }
-.page-header { margin-bottom: 22px; }
-.page-header h1 { margin: 5px 0; font-size: 30px; letter-spacing: -1px; }
-.page-header p, .runs header p { margin: 0; color: var(--text-secondary); }
-.eyebrow { font-size: 12px; font-weight: 750; letter-spacing: 1.8px; color: var(--el-color-primary); }
-.toolbar { justify-content: flex-start; gap: 12px; margin-bottom: 18px; }
-.toolbar .el-select { width: 260px; }
-.summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
-.summary-grid article, .run-card, aside { background: var(--el-bg-color); border: 1px solid var(--el-border-color-lighter); border-radius: 14px; }
-.summary-grid article { display: flex; padding: 17px; flex-direction: column; gap: 3px; }
-.summary-grid small, .summary-grid span, aside span, aside small, .run-head span, .run-meta { font-size: 12px; color: var(--text-secondary); }
-.summary-grid strong { font-size: 27px; }
-.workspace { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px; }
-aside { display: flex; padding: 14px; flex-direction: column; gap: 8px; }
-aside header { display: flex; padding: 5px 4px 10px; flex-direction: column; }
-aside button { display: flex; padding: 14px; text-align: left; cursor: pointer; background: transparent; border: 1px solid var(--el-border-color-lighter); border-radius: 10px; flex-direction: column; gap: 4px; }
-aside button.active { border-color: var(--el-color-primary); background: rgb(22 119 255 / 6%); }
-.new-version { margin-top: 5px; }
-.runs { display: flex; flex-direction: column; gap: 12px; }
-.runs h2 { margin: 0; }
-.run-card { padding: 17px; }
-.run-head > div { display: flex; flex-direction: column; gap: 3px; }
-.run-card .el-progress { margin: 15px 0 10px; }
-.run-meta, .run-actions { display: flex; gap: 18px; }
-.run-actions { margin-top: 8px; }
-.error { padding: 8px; color: var(--el-color-danger); background: var(--el-color-danger-light-9); border-radius: 7px; }
-.full { width: 100%; }
-.dialog-form { margin-top: 16px; }
-.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.detail-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
-.detail-summary article { display: flex; padding: 15px; background: var(--el-fill-color-light); border-radius: 10px; flex-direction: column; }
-.detail-summary strong { font-size: 24px; }
-.artifact-table { margin-top: 18px; }
-.empty-state { padding: 70px; text-align: center; color: var(--text-secondary); border: 1px dashed var(--el-border-color); border-radius: 12px; }
-@media (max-width: 1100px) { .summary-grid { grid-template-columns: repeat(2, 1fr); } .workspace { grid-template-columns: 1fr; } }
+.training-page {
+  min-height: 100%;
+  padding: var(--app-content-padding);
+  color: var(--text-primary);
+  background: var(--el-fill-color-extra-light);
+}
+
+.page-header,
+.toolbar,
+.run-head,
+.runs > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.page-header {
+  margin-bottom: 22px;
+}
+
+.page-header h1 {
+  margin: 5px 0;
+  font-size: 30px;
+  letter-spacing: -1px;
+}
+
+.page-header p,
+.runs header p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.eyebrow {
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 1.8px;
+  color: var(--el-color-primary);
+}
+
+.toolbar {
+  justify-content: flex-start;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.toolbar .el-select {
+  width: 260px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.summary-grid article,
+.run-card,
+aside {
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+}
+
+.summary-grid article {
+  display: flex;
+  padding: 17px;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.summary-grid small,
+.summary-grid span,
+aside span,
+aside small,
+.run-head span,
+.run-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.summary-grid strong {
+  font-size: 27px;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 18px;
+}
+
+aside {
+  display: flex;
+  padding: 14px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+aside header {
+  display: flex;
+  padding: 5px 4px 10px;
+  flex-direction: column;
+}
+
+aside button {
+  display: flex;
+  padding: 14px;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  flex-direction: column;
+  gap: 4px;
+}
+
+aside button.active {
+  background: rgb(22 119 255 / 6%);
+  border-color: var(--el-color-primary);
+}
+
+.new-version {
+  margin-top: 5px;
+}
+
+.runs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.runs h2 {
+  margin: 0;
+}
+
+.run-card {
+  padding: 17px;
+}
+
+.run-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.run-card .el-progress {
+  margin: 15px 0 10px;
+}
+
+.run-meta,
+.run-actions {
+  display: flex;
+  gap: 18px;
+}
+
+.run-actions {
+  margin-top: 8px;
+}
+
+.error {
+  padding: 8px;
+  color: var(--el-color-danger);
+  background: var(--el-color-danger-light-9);
+  border-radius: 7px;
+}
+
+.full {
+  width: 100%;
+}
+
+.dialog-form {
+  margin-top: 16px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.detail-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.detail-summary article {
+  display: flex;
+  padding: 15px;
+  background: var(--el-fill-color-light);
+  border-radius: 4px;
+  flex-direction: column;
+}
+
+.detail-summary strong {
+  font-size: 24px;
+}
+
+.artifact-table {
+  margin-top: 18px;
+}
+
+.drawer-header {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 16px;
+}
+
+.drawer-header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.drawer-header span {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.artifact-table code {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.empty-state {
+  padding: 70px;
+  color: var(--text-secondary);
+  text-align: center;
+  border: 1px dashed var(--el-border-color);
+  border-radius: 12px;
+}
+
+@media (width <= 1100px) {
+  .summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

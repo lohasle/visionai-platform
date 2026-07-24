@@ -22,6 +22,66 @@ export interface DeploymentRevision {
   activatedAt?: string
 }
 
+export interface InferenceStatus {
+  ready: boolean
+  deploymentStatus: string
+  revisionStatus?: string
+  currentRevisionId: number
+  revisionNo?: number
+  modelVersionId?: number
+  endpointUrl: string
+  checkedAt: string
+  lastTraceId?: string
+  lastRequestAt?: string
+  lastRequestStatus?: string
+  lastLatencyMs?: number
+  lastErrorAt?: string
+  lastErrorMessage?: string
+}
+
+export interface InferenceTrace {
+  id: number
+  traceId: string
+  assetId: number
+  sourceType: 'ASSET' | 'UPLOAD' | 'VIDEO_UPLOAD'
+  sourceName: string
+  sourceSha256: string
+  testMode: 'ONLINE' | 'REGRESSION'
+  expectedLabel: string
+  minimumConfidence: number
+  regressionStatus: 'NOT_ASSERTED' | 'PASSED' | 'FAILED'
+  matchedDetectionCount: number
+  status: string
+  latencyMs: number
+  detectionCount: number
+  meanConfidence: number
+  deploymentRevisionId: number
+  modelVersionId: number
+  errorMessage: string
+  createTime: string
+}
+
+export interface PredictionResponse {
+  traceId: string
+  deploymentRevisionId: number
+  modelVersionId: number
+  platformLatencyMs: number
+  result: {
+    detections: Array<{ label: string; confidence: number; bbox: number[] }>
+    latencyMs: number
+  }
+}
+
+export interface ImageRegressionResponse extends PredictionResponse {
+  input: { filename: string; format: string; width: number; height: number; sha256: string }
+  regression: {
+    status: 'NOT_ASSERTED' | 'PASSED' | 'FAILED'
+    expectedLabel: string
+    minimumConfidence: number
+    matchedDetectionCount: number
+  }
+}
+
 export const getDeployments = (projectId: number) =>
   request.get<{ deployments: Deployment[]; revisions: DeploymentRevision[] }>({
     url: `/ai-platform/projects/${projectId}/deployments`
@@ -34,31 +94,53 @@ export const getDeployment = (projectId: number, deploymentId: number) =>
   request.get<{
     deployment: Deployment
     revisions: DeploymentRevision[]
-    traces: Array<{
-      id: number
-      traceId: string
-      assetId: number
-      status: string
-      latencyMs: number
-      detectionCount: number
-      meanConfidence: number
-      deploymentRevisionId: number
-      modelVersionId: number
-    }>
+    traces: InferenceTrace[]
     metrics: Record<string, number>
-    alertRules: Array<{ id: number; name: string; metric: string; operator: string; threshold: number }>
-    alerts: Array<{ id: number; status: string; message: string; metricValue: number; createTime: string }>
+    inferenceStatus: InferenceStatus
+    alertRules: Array<{
+      id: number
+      name: string
+      metric: string
+      operator: string
+      threshold: number
+    }>
+    alerts: Array<{
+      id: number
+      status: string
+      message: string
+      metricValue: number
+      createTime: string
+    }>
   }>({ url: `/ai-platform/projects/${projectId}/deployments/${deploymentId}` })
 
 export const predict = (projectId: number, deploymentId: number, assetId: number) =>
-  request.post<{
-    traceId: string
-    deploymentRevisionId: number
-    modelVersionId: number
-    result: { detections: Array<{ label: string; confidence: number; bbox: number[] }>; latencyMs: number }
-  }>({ url: `/ai-platform/projects/${projectId}/deployments/${deploymentId}/predict`, data: { assetId } })
+  request.post<PredictionResponse>({
+    url: `/ai-platform/projects/${projectId}/deployments/${deploymentId}/predict`,
+    data: { assetId }
+  })
 
-export const rollbackDeployment = (projectId: number, deploymentId: number, targetRevisionId: number) =>
+export const predictImage = (
+  projectId: number,
+  deploymentId: number,
+  file: File,
+  expectedLabel?: string,
+  minimumConfidence?: number
+) => {
+  const data = new FormData()
+  data.append('file', file)
+  if (expectedLabel?.trim()) data.append('expectedLabel', expectedLabel.trim())
+  if (minimumConfidence !== undefined) data.append('minimumConfidence', String(minimumConfidence))
+  return request.post<ImageRegressionResponse>({
+    url: `/ai-platform/projects/${projectId}/deployments/${deploymentId}/predict-image`,
+    data
+  })
+}
+
+export const rollbackDeployment = (
+  projectId: number,
+  deploymentId: number,
+  targetRevisionId: number
+) =>
   request.post({
     url: `/ai-platform/projects/${projectId}/deployments/${deploymentId}/rollback`,
     data: { targetRevisionId }
@@ -67,7 +149,14 @@ export const rollbackDeployment = (projectId: number, deploymentId: number, targ
 export const stopDeployment = (projectId: number, deploymentId: number) =>
   request.post({ url: `/ai-platform/projects/${projectId}/deployments/${deploymentId}/stop` })
 
-export const createAlertRule = (projectId: number, deploymentId: number, data: Record<string, unknown>) =>
+export const restartDeployment = (projectId: number, deploymentId: number) =>
+  request.post({ url: `/ai-platform/projects/${projectId}/deployments/${deploymentId}/restart` })
+
+export const createAlertRule = (
+  projectId: number,
+  deploymentId: number,
+  data: Record<string, unknown>
+) =>
   request.post({
     url: `/ai-platform/projects/${projectId}/deployments/${deploymentId}/alert-rules`,
     data

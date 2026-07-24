@@ -104,6 +104,13 @@ services:
     networks:
       - default
       - visionai-cvat
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: visionai-cvat
+      traefik.http.services.visionai-cvat-sso.loadbalancer.server.port: "58080"
+      traefik.http.routers.visionai-cvat-sso.rule: "PathPrefix(`/admin-api/ai-platform/workbench-sso/cvat`)"
+      traefik.http.routers.visionai-cvat-sso.entrypoints: web
+      traefik.http.routers.visionai-cvat-sso.priority: 200
     restart: unless-stopped
 
   orchestrator:
@@ -242,7 +249,6 @@ services:
     image: visionai/fiftyone:1.15.0
     container_name: visionai-fiftyone
     ports:
-      - "25151:5151"
       - "25152:5152"
     volumes:
       - visionai-fiftyone:/fiftyone
@@ -262,6 +268,25 @@ services:
       timeout: 5s
       retries: 30
       start_period: 30s
+    restart: unless-stopped
+
+  fiftyone-gateway:
+    image: nginx:1.27-alpine
+    container_name: visionai-fiftyone-gateway
+    ports:
+      - "25151:8080"
+    volumes:
+      - ./deploy/fiftyone-gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      fiftyone:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
     restart: unless-stopped
 
   inference:

@@ -1163,6 +1163,36 @@ paths:
       summary: Create a reproducible dataset version
       tags:
       - VisionAI Dataset
+  /ai-platform/projects/{id}/deployments/{deploymentId}/predict-image:
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: JPEG, PNG or WebP image up to 20 MiB
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Expected detection label
+        in: formData
+        name: expectedLabel
+        type: string
+      - description: Minimum confidence from 0 to 1
+        in: formData
+        name: minimumConfidence
+        type: number
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Upload an image and run an online regression test
+      tags:
+      - VisionAI Deployment
   /ai-platform/projects/{id}/status:
     put:
       responses:
@@ -1198,6 +1228,20 @@ paths:
       summary: Get training logs, metrics and artifacts
       tags:
       - VisionAI Training
+  /ai-platform/projects/{id}/training-runs/{runId}/artifacts/{artifactId}/download:
+    get:
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+      security:
+      - BearerAuth: []
+      summary: Download one training artifact
+      tags:
+      - VisionAI Training
   /ai-platform/projects/{id}/training-runs/{runId}/cancel:
     post:
       responses: {}
@@ -1212,6 +1256,20 @@ paths:
       security:
       - BearerAuth: []
       summary: Clone a reproducible training configuration
+      tags:
+      - VisionAI Training
+  /ai-platform/projects/{id}/training-runs/{runId}/export:
+    get:
+      produces:
+      - application/zip
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+      security:
+      - BearerAuth: []
+      summary: Export a training run and its artifacts as ZIP
       tags:
       - VisionAI Training
   /ai-platform/projects/{id}/training-runs/compare:
@@ -1374,6 +1432,28 @@ paths:
       summary: Remove project member
       tags:
       - VisionAI Project
+  /ai-platform/workbench-sso/cvat:
+    get:
+      produces:
+      - text/html
+      responses: {}
+      summary: Exchange a one-time VisionAI ticket for a personal CVAT session
+      tags:
+      - VisionAI Workbench
+  /ai-platform/workbench-sso/fiftyone:
+    get:
+      produces:
+      - text/html
+      responses: {}
+      summary: Exchange a one-time VisionAI ticket for a protected FiftyOne session
+      tags:
+      - VisionAI Workbench
+  /ai-platform/workbench-sso/fiftyone/validate:
+    get:
+      responses: {}
+      summary: Validate a FiftyOne gateway session
+      tags:
+      - VisionAI Workbench
   /app/health:
     get:
       description: Health endpoint used by deployment probes and scaffold modules.

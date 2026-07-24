@@ -70,11 +70,28 @@ func markAnnotationFailure(db *gorm.DB, task *AnnotationTask, code string, err e
 }
 
 func prepareCVATTask(ctx context.Context, db *gorm.DB, provider annotation.Provider, objectStore storage.Provider, task *AnnotationTask) error {
+	var annotatorIDs []uint64
+	if err := json.Unmarshal([]byte(task.AnnotatorIDs), &annotatorIDs); err != nil || len(annotatorIDs) == 0 {
+		return errors.New("annotation task has no valid annotators")
+	}
+	identities, err := (&Handler{db: db}).ensureCVATIdentities(ctx, task.TenantID, annotatorIDs)
+	if err != nil {
+		return err
+	}
+	var mediaCount int64
+	if err = db.Model(&AssetCollectionItem{}).
+		Where("tenant_id = ? AND collection_id = ?", task.TenantID, task.CollectionID).
+		Count(&mediaCount).Error; err != nil {
+		return err
+	}
+	if mediaCount == 0 {
+		return errors.New("frozen collection contains no assets")
+	}
+	segmentSize := int((mediaCount + int64(len(identities)) - 1) / int64(len(identities)))
 	var binding ExternalResourceBinding
 	result := db.Where("tenant_id = ? AND provider_type = ? AND internal_type = ? AND internal_id = ?",
 		task.TenantID, "CVAT", "ANNOTATION_TASK", task.ID).First(&binding)
 	var external annotation.Task
-	var err error
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		var labels []annotation.Label
 		if err = json.Unmarshal([]byte(task.Labels), &labels); err != nil {
@@ -83,7 +100,7 @@ func prepareCVATTask(ctx context.Context, db *gorm.DB, provider annotation.Provi
 		if err = provider.About(ctx); err != nil {
 			return fmt.Errorf("CVAT unavailable: %w", err)
 		}
-		external, err = provider.CreateTask(ctx, task.Name, labels)
+		external, err = provider.CreateTask(ctx, task.Name, labels, segmentSize)
 		if err != nil {
 			return fmt.Errorf("create CVAT task: %w", err)
 		}
@@ -143,6 +160,12 @@ func prepareCVATTask(ctx context.Context, db *gorm.DB, provider annotation.Provi
 			}
 			binding.SyncCursor = "DATA_ATTACHED"
 		}
+	}
+	if cvat, ok := provider.(*annotation.CVAT); ok {
+		if _, err = cvat.AssignTaskJobs(ctx, external.ID, mappingIDs(identities)); err != nil {
+			return fmt.Errorf("assign CVAT jobs: %w", err)
+		}
+		binding.SyncCursor = "JOBS_ASSIGNED"
 	}
 	now := time.Now()
 	binding.LastSyncAt = &now
