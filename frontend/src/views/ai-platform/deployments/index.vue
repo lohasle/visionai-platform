@@ -124,9 +124,9 @@ const loadAll = async () => {
   if (!projectId.value) return
   const data = await getDeployments(projectId.value)
   deployments.value = data.deployments
-  if (selected.value) selected.value = deployments.value.find((row) => row.id === selected.value?.id)
-  else selected.value = deployments.value[0]
-  if (selected.value) detail.value = await getDeployment(projectId.value, selected.value.id)
+  selected.value = deployments.value.find((row) => row.id === selected.value?.id) || deployments.value[0]
+  detail.value = selected.value ? await getDeployment(projectId.value, selected.value.id) : undefined
+  prediction.value = undefined
 }
 const selectDeployment = async (item: Deployment) => {
   selected.value = item
@@ -168,7 +168,7 @@ const ack = async (alertId: number) => {
 onMounted(async () => {
   const data = await getProjectPage({ pageNo: 1, pageSize: 100 })
   projects.value = data.list
-  projectId.value = projects.value.at(-1)?.id
+  projectId.value = projects.value[0]?.id
   await loadAll()
 })
 </script>

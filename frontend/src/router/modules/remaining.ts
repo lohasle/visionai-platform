@@ -126,34 +126,6 @@ const remainingRouter: AppRouteRecordRaw[] = [
     ]
   },
   {
-    path: '/member',
-    component: Layout,
-    name: 'MemberCenter',
-    meta: { hidden: true },
-    children: [
-      {
-        path: 'user/detail/:id',
-        name: 'MemberUserDetail',
-        component: () => import('@/views/member/user/detail/index.vue'),
-        meta: { title: '会员详情', noCache: true, hidden: true, activeMenu: '/member/user' }
-      }
-    ]
-  },
-  {
-    path: '/pay',
-    component: Layout,
-    name: 'PayCenter',
-    meta: { hidden: true },
-    children: [
-      {
-        path: 'cashier',
-        name: 'PayCashier',
-        component: () => import('@/views/pay/cashier/index.vue'),
-        meta: { title: '收银台', noCache: true, hidden: true }
-      }
-    ]
-  },
-  {
     path: '/login',
     component: () => import('@/views/Login/Login.vue'),
     name: 'Login',

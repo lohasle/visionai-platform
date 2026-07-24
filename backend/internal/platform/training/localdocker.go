@@ -61,6 +61,13 @@ func (p LocalDocker) Run(ctx context.Context, spec LocalDockerSpec) (ResultManif
 	if err = os.MkdirAll(outputDir, 0o750); err != nil {
 		return ResultManifest{}, nil, err
 	}
+	// MkdirAll can create the per-feature parent (for example
+	// /training-work/template-smoke) with mode 0750. The trainer's fixed UID
+	// needs execute permission on that parent before it can reach the
+	// deliberately world-writable per-run directory below.
+	if err = os.Chmod(filepath.Dir(outputDir), 0o755); err != nil {
+		return ResultManifest{}, nil, err
+	}
 	// The container runs as an unprivileged fixed UID. The per-run directory
 	// contains only generated artifacts and must be writable across host UID
 	// mappings (Linux, WSL2, and Docker Desktop).

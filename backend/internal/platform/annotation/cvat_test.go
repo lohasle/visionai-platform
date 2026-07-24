@@ -82,7 +82,7 @@ func TestCVATProviderContract(t *testing.T) {
 	if err = provider.PutAnnotations(ctx, task.ID, raw); err != nil || !replaced {
 		t.Fatalf("replace annotations: %v replaced=%v", err, replaced)
 	}
-	if got := provider.TaskURL(task.ID); got != "https://cvat.example.test/tasks/42/jobs" {
+	if got := provider.TaskURL(task.ID); got != "https://cvat.example.test/tasks/42" {
 		t.Fatalf("task URL = %s", got)
 	}
 }

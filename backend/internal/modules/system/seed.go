@@ -23,8 +23,6 @@ func SeedBase(db *gorm.DB) error {
 	groups := []SystemMenu{
 		{ID: 1, Name: "系统管理", Type: 1, Sort: 10, ParentID: 0, Path: "/system", Icon: "ep:tools", Status: 0, Visible: true, KeepAlive: true, AlwaysShow: true},
 		{ID: 2, Name: "基础设施", Type: 1, Sort: 20, ParentID: 0, Path: "/infra", Icon: "ep:setting", Status: 0, Visible: true, KeepAlive: true, AlwaysShow: true},
-		{ID: 3, Name: "会员中心", Type: 1, Sort: 30, ParentID: 0, Path: "/member", Icon: "ep:user-filled", Status: 0, Visible: true, KeepAlive: true, AlwaysShow: true},
-		{ID: 4, Name: "支付中心", Type: 1, Sort: 40, ParentID: 0, Path: "/pay", Icon: "ep:wallet-filled", Status: 0, Visible: true, KeepAlive: true, AlwaysShow: true},
 		{ID: 5, Name: "VisionAI", Type: 1, Sort: 1, ParentID: 0, Path: "/ai-platform", Icon: "lucide:scan-eye", Status: 0, Visible: true, KeepAlive: true, AlwaysShow: true},
 	}
 	pages := []menuSeed{
@@ -57,13 +55,6 @@ func SeedBase(db *gorm.DB) error {
 		{207, 2, "定时任务", "job", "ep:timer", "infra/job/index", "InfraJob", 7, []string{"infra:job:query", "infra:job:create", "infra:job:update", "infra:job:delete", "infra:job:trigger", "infra:job:export"}},
 		{208, 2, "任务日志", "job-log", "ep:document", "infra/job/logger/index", "InfraJobLog", 8, []string{"infra:job-log:query", "infra:job-log:export"}},
 		{209, 2, "Redis 监控", "redis", "ep:odometer", "infra/redis/index", "InfraRedis", 9, []string{"infra:redis:query"}},
-		{301, 3, "会员管理", "user", "ep:user", "member/user/index", "MemberUser", 1, []string{"member:user:query", "member:user:create", "member:user:update", "member:user:delete", "member:user:update-level", "member:user:update-point"}},
-		{302, 3, "会员等级", "level", "ep:medal", "member/level/index", "MemberLevel", 2, []string{"member:level:query", "member:level:create", "member:level:update", "member:level:delete"}},
-		{303, 3, "会员分组", "group", "ep:collection-tag", "member/group/index", "MemberGroup", 3, []string{"member:group:query", "member:group:create", "member:group:update", "member:group:delete"}},
-		{304, 3, "会员标签", "tag", "ep:price-tag", "member/tag/index", "MemberTag", 4, []string{"member:tag:query", "member:tag:create", "member:tag:update", "member:tag:delete"}},
-		{401, 4, "支付应用", "app", "ep:grid", "pay/app/index", "PayApp", 1, []string{"pay:app:query", "pay:app:create", "pay:app:update", "pay:app:delete", "pay:channel:query", "pay:channel:create", "pay:channel:update", "pay:channel:delete"}},
-		{402, 4, "支付订单", "order", "ep:tickets", "pay/order/index", "PayOrder", 2, []string{"pay:order:query", "pay:order:export"}},
-		{403, 4, "退款管理", "refund", "ep:refresh-left", "pay/refund/index", "PayRefund", 3, []string{"pay:refund:query", "pay:refund:create", "pay:refund:update", "pay:refund:delete", "pay:refund:export"}},
 		{501, 5, "工作台", "dashboard", "lucide:layout-dashboard", "ai-platform/dashboard/index", "VisionAIDashboard", 1, []string{"ai-platform:dashboard:query", "ai-platform:job:query", "ai-platform:job:cancel", "ai-platform:job:retry"}},
 		{502, 5, "项目中心", "projects", "lucide:folder-kanban", "ai-platform/projects/index", "VisionAIProjects", 2, []string{"ai-platform:project:query", "ai-platform:project:create", "ai-platform:project:update", "ai-platform:project:archive", "ai-platform:project:member", "ai-platform:project:config"}},
 		{503, 5, "数据资产", "assets", "lucide:images", "ai-platform/assets/index", "VisionAIAssets", 3, []string{"ai-platform:asset:query", "ai-platform:asset:upload", "ai-platform:asset:import", "ai-platform:asset:update", "ai-platform:asset:delete"}},
@@ -82,7 +73,7 @@ func SeedBase(db *gorm.DB) error {
 		}
 	}
 	// 清理当前底座未启用的菜单树及角色关联，重复启动保持幂等。
-	if err := deleteMenuTrees(db, []uint64{107, 121, 122, 210, 211}); err != nil {
+	if err := deleteMenuTrees(db, []uint64{3, 4, 107, 121, 122, 210, 211}); err != nil {
 		return err
 	}
 	for _, page := range pages {

@@ -9,8 +9,6 @@ import (
 	"github.com/lohasle/nimbus-framework-go/internal/modules/application"
 	"github.com/lohasle/nimbus-framework-go/internal/modules/im"
 	"github.com/lohasle/nimbus-framework-go/internal/modules/infra"
-	"github.com/lohasle/nimbus-framework-go/internal/modules/member"
-	"github.com/lohasle/nimbus-framework-go/internal/modules/pay"
 	"github.com/lohasle/nimbus-framework-go/internal/modules/system"
 	"github.com/lohasle/nimbus-framework-go/internal/modules/visionai"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/httpx"
@@ -222,14 +220,10 @@ func New(handler *system.Handler, db *gorm.DB) *gin.Engine {
 	systemAdmin.GET("/area/tree", handler.AreaTree)
 	systemAdmin.GET("/area/get-by-ip", handler.AreaByIP)
 	infra.Register(admin, db, handler.Auth())
-	member.Register(admin, db, handler.Auth())
-	pay.Register(admin, db, handler.Auth())
 	visionai.Register(admin, db, handler.Auth())
 	for _, module := range []string{
 		system.ModuleName,
 		infra.ModuleName,
-		member.ModuleName,
-		pay.ModuleName,
 		application.ModuleName,
 		im.ModuleName,
 		appmodule.ModuleName,
@@ -252,8 +246,6 @@ func New(handler *system.Handler, db *gorm.DB) *gin.Engine {
 // @Router /health [get]
 // @Router /system/health [get]
 // @Router /infra/health [get]
-// @Router /member/health [get]
-// @Router /pay/health [get]
 // @Router /application/health [get]
 // @Router /im/health [get]
 // @Router /app/health [get]

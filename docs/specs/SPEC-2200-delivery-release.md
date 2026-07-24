@@ -21,3 +21,5 @@ Linear：LOH-17
 - 默认 Compose 完整启动 API、编排器、Web、MySQL、Redis、RabbitMQ、MinIO、CVAT、FiftyOne 和推理；服务固定版本、健康检查和数据卷齐全。
 - 提供 Windows/Linux override、GPU profile、doctor/doctor-gpu、bootstrap、E2E、备份恢复和带 `CONFIRM=YES` 保护的重置脚本。
 - Go 测试、Vue 类型检查/生产构建、Compose 三配置解析通过；产品手册、验收报告、截图、CI、Pages 和发布说明已纳入仓库。
+- `scripts/e2e-coco128.ps1` 使用公开 COCO128 的 128 张真实图片与 929 个对象框，完成 CVAT、数据集冻结、LocalDocker 训练、FiftyOne 评估、四眼审批、生产部署、推理和反馈返标。
+- 产品边界已收敛到 System、Infra 与 VisionAI；会员中心和支付中心的后端模块、前端页面、路由、菜单种子、Swagger 与空库初始化均已移除。

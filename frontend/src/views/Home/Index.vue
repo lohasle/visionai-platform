@@ -4,7 +4,7 @@
       <div>
         <span class="eyebrow">NIMBUS WORKSPACE</span>
         <h1>{{ greeting }}，{{ username }}</h1>
-        <p>从这里进入系统、基础设施、会员与支付等平台能力。</p>
+        <p>从这里进入 VisionAI 项目、数据、训练、评测与部署等平台能力。</p>
       </div>
       <div class="page-heading__actions">
         <el-button tag="a" :href="apiDocsUrl" target="_blank" rel="noreferrer">
@@ -32,7 +32,7 @@
           <h2>平台能力</h2>
           <p>复用框架已有中心；模板模块仅保留清晰的扩展边界。</p>
         </div>
-        <span class="section-badge">4 核心中心 · 3 扩展边界</span>
+        <span class="section-badge">2 个平台底座 · 3 个扩展边界</span>
       </header>
 
       <div class="domain-grid">
@@ -134,16 +134,6 @@ const domains = [
     name: '基础设施',
     description: '配置、日志、任务、文件与监控边界',
     icon: 'lucide:server-cog'
-  },
-  {
-    name: '会员中心',
-    description: '会员、等级、积分与用户画像边界',
-    icon: 'lucide:users-round'
-  },
-  {
-    name: '支付中心',
-    description: '应用、渠道、订单、退款与钱包边界',
-    icon: 'lucide:wallet-cards'
   },
   {
     name: '应用中心',

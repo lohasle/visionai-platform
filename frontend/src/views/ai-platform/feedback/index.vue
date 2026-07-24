@@ -130,7 +130,7 @@ const runCleanup = async () => {
 onMounted(async () => {
   const data = await getProjectPage({ pageNo: 1, pageSize: 100 })
   projects.value = data.list
-  projectId.value = projects.value.at(-1)?.id
+  projectId.value = projects.value[0]?.id
   await loadAll()
 })
 </script>

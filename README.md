@@ -40,7 +40,10 @@ Windows：
 ```powershell
 .\scripts\doctor.ps1
 .\scripts\e2e.ps1
+.\scripts\e2e-coco128.ps1
 ```
+
+`e2e-coco128.ps1` 会下载公开 COCO128 数据集，并重放资产导入、CVAT 标注、数据集冻结、训练、FiftyOne 评估、模型审批、部署推理与反馈返标完整链路。
 
 GPU 可选栈：
 
