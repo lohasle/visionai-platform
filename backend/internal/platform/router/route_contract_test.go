@@ -103,6 +103,7 @@ func TestVisibleAdminRouteContract(t *testing.T) {
 		"GET /admin-api/ai-platform/projects/:id/asset-imports/:importId",
 		"GET /admin-api/ai-platform/projects/:id/collections",
 		"POST /admin-api/ai-platform/projects/:id/collections",
+		"GET /admin-api/ai-platform/projects/:id/collections/:collectionId/assets",
 		"PUT /admin-api/ai-platform/projects/:id/collections/:collectionId/assets",
 		"POST /admin-api/ai-platform/projects/:id/collections/:collectionId/freeze",
 		"PUT /admin-api/ai-platform/projects/:id/assets/:assetId/tags",

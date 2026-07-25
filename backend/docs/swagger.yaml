@@ -1097,6 +1097,17 @@ paths:
       tags:
       - VisionAI Asset
   /ai-platform/projects/{id}/collections/{collectionId}/assets:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Page assets inside a collection
+      tags:
+      - VisionAI Asset
     put:
       responses:
         "200":

@@ -21,5 +21,6 @@
 | [SPEC-2220](SPEC-2220-artifact-export-inference-regression-ux.md) | 训练产物导出、推理回归测试与产品体验完善 | 已完成（Linear LOH-19） |
 | [SPEC-2230](SPEC-2230-rtx3060-gpu-e2e-reliability.md) | RTX 3060 GPU 全链路可靠性修复 | 已完成（Linear LOH-20） |
 | [SPEC-2240](SPEC-2240-system-role-project-authorization.md) | 统一复用系统角色管理与项目授权 | 已完成（Linear LOH-21） |
+| [SPEC-2250](SPEC-2250-asset-collections-lan-workbench.md) | 资产集合工作流与局域网工作台访问 | 已完成（Linear LOH-22） |
 
 SPEC 状态必须以自动化测试和实际运行验收为依据。

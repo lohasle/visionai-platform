@@ -48,12 +48,19 @@ export const getEvaluationSuites = (projectId: number) =>
   request.get<EvaluationSuite[]>({ url: `/ai-platform/projects/${projectId}/evaluation-suites` })
 
 export const createEvaluationSuite = (projectId: number, data: Record<string, unknown>) =>
-  request.post<EvaluationSuite>({ url: `/ai-platform/projects/${projectId}/evaluation-suites`, data })
+  request.post<EvaluationSuite>({
+    url: `/ai-platform/projects/${projectId}/evaluation-suites`,
+    data
+  })
 
 export const getEvaluationRuns = (projectId: number) =>
   request.get<EvaluationRun[]>({ url: `/ai-platform/projects/${projectId}/evaluation-runs` })
 
-export const createEvaluationRun = (projectId: number, suiteId: number, data: Record<string, unknown>) =>
+export const createEvaluationRun = (
+  projectId: number,
+  suiteId: number,
+  data: Record<string, unknown>
+) =>
   request.post<{ run: EvaluationRun }>({
     url: `/ai-platform/projects/${projectId}/evaluation-suites/${suiteId}/runs`,
     data

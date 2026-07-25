@@ -48,24 +48,24 @@ x-visionai-app-env: &visionai-app-env
   NIMBUS_EVENT_EXCHANGE: visionai.events
   NIMBUS_EVENT_QUEUE: visionai.domain-events.v1
   NIMBUS_S3_ENDPOINT: minio:9000
-  NIMBUS_S3_PUBLIC_ENDPOINT: localhost:29000
+  NIMBUS_S3_PUBLIC_ENDPOINT: ${VISIONAI_PUBLIC_HOST:-localhost}:29000
   NIMBUS_S3_ACCESS_KEY: visionai
   NIMBUS_S3_SECRET_KEY: visionai_minio_dev
   NIMBUS_S3_BUCKET: visionai-assets
   NIMBUS_S3_SECURE: "false"
   NIMBUS_IMPORT_ROOT: /imports
   NIMBUS_CVAT_BASE_URL: http://cvat-gateway:8080
-  NIMBUS_CVAT_PUBLIC_URL: http://localhost:28080
+  NIMBUS_CVAT_PUBLIC_URL: http://${VISIONAI_PUBLIC_HOST:-localhost}:28080
   NIMBUS_CVAT_USERNAME: visionai
   NIMBUS_CVAT_PASSWORD: visionai_cvat_dev
   NIMBUS_TRAINING_WORK_ROOT: /training-work
   NIMBUS_DOCKER_BINARY: docker
   NIMBUS_DOCKER_VOLUMES_FROM: visionai-orchestrator
   NIMBUS_FIFTYONE_API_URL: http://fiftyone:5152
-  NIMBUS_FIFTYONE_PUBLIC_URL: http://localhost:25151
+  NIMBUS_FIFTYONE_PUBLIC_URL: http://${VISIONAI_PUBLIC_HOST:-localhost}:25151
   NIMBUS_FIFTYONE_MEDIA_HOST: host.docker.internal:29000
   NIMBUS_INFERENCE_API_URL: http://inference:8000
-  NIMBUS_INFERENCE_PUBLIC_URL: http://localhost:28000
+  NIMBUS_INFERENCE_PUBLIC_URL: http://${VISIONAI_PUBLIC_HOST:-localhost}:28000
   NIMBUS_JWT_SECRET: ${NIMBUS_JWT_SECRET:-visionai-local-development-secret}
   NIMBUS_BOOTSTRAP_TENANT: ${NIMBUS_BOOTSTRAP_TENANT:-Nimbus Framework}
   NIMBUS_BOOTSTRAP_USERNAME: ${NIMBUS_BOOTSTRAP_USERNAME:-admin}
@@ -289,8 +289,14 @@ services:
     container_name: visionai-fiftyone-gateway
     ports:
       - "25151:8080"
+    environment:
+      VISIONAI_FRAME_ANCESTORS: "'self' ${VISIONAI_WORKBENCH_ORIGIN:-http://localhost:48080} http://127.0.0.1:48080 http://${VISIONAI_PUBLIC_HOST:-localhost}:48080"
+    command:
+      - /bin/sh
+      - -c
+      - envsubst '$$VISIONAI_FRAME_ANCESTORS' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && exec nginx -g 'daemon off;'
     volumes:
-      - ./deploy/fiftyone-gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/fiftyone-gateway/nginx.conf:/etc/nginx/nginx.conf.template:ro
     depends_on:
       fiftyone:
         condition: service_healthy
@@ -415,7 +421,7 @@ services:
       traefik.http.routers.cvat-api.entrypoints: web
       traefik.http.routers.cvat-api.middlewares: cvat-visionai-embed
       traefik.http.middlewares.cvat-visionai-embed.headers.customresponseheaders.X-Frame-Options: ""
-      traefik.http.middlewares.cvat-visionai-embed.headers.contentsecuritypolicy: "frame-ancestors 'self' ${VISIONAI_WORKBENCH_ORIGIN:-http://localhost:48080} http://127.0.0.1:48080"
+      traefik.http.middlewares.cvat-visionai-embed.headers.contentsecuritypolicy: "frame-ancestors 'self' ${VISIONAI_WORKBENCH_ORIGIN:-http://localhost:48080} http://127.0.0.1:48080 http://${VISIONAI_PUBLIC_HOST:-localhost}:48080"
     volumes:
       - visionai-cvat-data:/home/django/data
       - visionai-cvat-keys:/home/django/keys

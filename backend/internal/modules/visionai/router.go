@@ -111,6 +111,7 @@ func Register(group *gin.RouterGroup, db *gorm.DB, auth gin.HandlerFunc) {
 	api.GET("/projects/:id/asset-imports/:importId", h.AssetImportGet)
 	api.GET("/projects/:id/collections", h.CollectionPage)
 	api.POST("/projects/:id/collections", h.CollectionCreate)
+	api.GET("/projects/:id/collections/:collectionId/assets", h.CollectionAssetsPage)
 	api.PUT("/projects/:id/collections/:collectionId/assets", h.CollectionAddAssets)
 	api.POST("/projects/:id/collections/:collectionId/freeze", h.CollectionFreeze)
 	api.PUT("/projects/:id/assets/:assetId/tags", h.AssetTagsUpdate)

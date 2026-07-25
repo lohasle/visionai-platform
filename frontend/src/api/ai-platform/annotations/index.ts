@@ -133,9 +133,8 @@ export const openAnnotationWorkbench = (projectId: number, taskId: number) =>
 export const getCVATUserMappings = () =>
   request.get<CVATUserMapping[]>({ url: '/ai-platform/cvat-user-mappings' })
 
-export const saveCVATUserMapping = (data: {
-  platformUserId: number
-}) => request.put<CVATUserMapping>({ url: '/ai-platform/cvat-user-mappings', data })
+export const saveCVATUserMapping = (data: { platformUserId: number }) =>
+  request.put<CVATUserMapping>({ url: '/ai-platform/cvat-user-mappings', data })
 
 export const getAssetCollections = (projectId: number) =>
   request.get<AssetCollection[]>({ url: `/ai-platform/projects/${projectId}/collections` })

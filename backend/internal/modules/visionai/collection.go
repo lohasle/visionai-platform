@@ -221,6 +221,49 @@ func (h *Handler) CollectionFreeze(c *gin.Context) {
 	httpx.OK(c, collection)
 }
 
+// CollectionAssetsPage godoc
+// @Summary Page assets inside a collection
+// @Tags VisionAI Asset
+// @Security BearerAuth
+// @Success 200 {object} httpx.Response
+// @Router /ai-platform/projects/{id}/collections/{collectionId}/assets [get]
+func (h *Handler) CollectionAssetsPage(c *gin.Context) {
+	project, ok := h.projectAccess(c, false)
+	if !ok {
+		return
+	}
+	collection, ok := h.getCollection(c, project)
+	if !ok {
+		return
+	}
+	query := h.db.Model(&Asset{}).
+		Joins("JOIN ai_asset_collection_item i ON i.asset_id = ai_asset.id AND i.collection_id = ?", collection.ID).
+		Where("ai_asset.tenant_id = ? AND ai_asset.project_id = ?", project.TenantID, project.ID)
+	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
+		query = query.Where("ai_asset.filename LIKE ? OR ai_asset.sha256 LIKE ?", "%"+keyword+"%", keyword+"%")
+	}
+	var total int64
+	query.Count(&total)
+	pageNo, pageSize := page(c)
+	var rows []Asset
+	query.Order("ai_asset.id DESC").Offset((pageNo - 1) * pageSize).Limit(pageSize).Find(&rows)
+	type assetView struct {
+		Asset
+		ThumbnailURL string `json:"thumbnailUrl"`
+	}
+	result := make([]assetView, 0, len(rows))
+	for _, row := range rows {
+		view := assetView{Asset: row}
+		if h.storage != nil && row.ThumbnailObjectKey != "" {
+			if signed, err := h.storage.PresignedGet(c.Request.Context(), row.ThumbnailObjectKey, 10*time.Minute); err == nil {
+				view.ThumbnailURL = signed.String()
+			}
+		}
+		result = append(result, view)
+	}
+	httpx.OK(c, gin.H{"collection": collection, "list": result, "total": total})
+}
+
 // AssetTagsUpdate godoc
 // @Summary Replace asset tags
 // @Tags VisionAI Asset

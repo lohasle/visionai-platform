@@ -422,13 +422,11 @@ const submitCreate = async () => {
       taskType: form.taskType,
       collectionId: form.collectionId,
       ontologyVersion: form.ontologyVersion,
-      labels: form.labels
-        .split(',')
-        .map((name, index) => ({
-          name: name.trim(),
-          type: 'rectangle',
-          color: ['#ff4d4f', '#1677ff', '#52c41a'][index % 3]
-        })),
+      labels: form.labels.split(',').map((name, index) => ({
+        name: name.trim(),
+        type: 'rectangle',
+        color: ['#ff4d4f', '#1677ff', '#52c41a'][index % 3]
+      })),
       annotatorIds: form.annotatorIds,
       reviewerIds: form.reviewerIds
     })

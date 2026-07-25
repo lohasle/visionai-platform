@@ -209,11 +209,7 @@
             />
           </el-form-item>
           <el-form-item label="可用加速器">
-            <el-input
-              :model-value="gpuSummary"
-              readonly
-              placeholder="未发现在线 GPU 节点"
-            />
+            <el-input :model-value="gpuSummary" readonly placeholder="未发现在线 GPU 节点" />
           </el-form-item>
         </div>
       </el-form>
@@ -302,11 +298,7 @@
 
 <script lang="ts" setup>
 import { getProjectPage, type Project } from '@/api/ai-platform/projects'
-import {
-  getDatasets,
-  getDatasetVersions,
-  type DatasetVersion
-} from '@/api/ai-platform/datasets'
+import { getDatasets, getDatasetVersions, type DatasetVersion } from '@/api/ai-platform/datasets'
 import { getResourceOverview } from '@/api/ai-platform/operations'
 import {
   cancelTrainingRun,

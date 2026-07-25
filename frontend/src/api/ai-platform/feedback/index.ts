@@ -43,12 +43,22 @@ export const getFeedbackPolicy = (projectId: number) =>
 export const saveFeedbackPolicy = (projectId: number, data: Record<string, unknown>) =>
   request.put<FeedbackPolicy>({ url: `/ai-platform/projects/${projectId}/feedback-policy`, data })
 export const getFeedbackSamples = (projectId: number, status?: string) =>
-  request.get<FeedbackSample[]>({ url: `/ai-platform/projects/${projectId}/feedback-samples`, params: { status } })
+  request.get<FeedbackSample[]>({
+    url: `/ai-platform/projects/${projectId}/feedback-samples`,
+    params: { status }
+  })
 export const getFeedbackBatches = (projectId: number) =>
   request.get<FeedbackBatch[]>({ url: `/ai-platform/projects/${projectId}/feedback-batches` })
-export const createFeedbackBatch = (projectId: number, data: { name: string; sampleIds: number[] }) =>
+export const createFeedbackBatch = (
+  projectId: number,
+  data: { name: string; sampleIds: number[] }
+) =>
   request.post<FeedbackBatch>({ url: `/ai-platform/projects/${projectId}/feedback-batches`, data })
-export const reviewFeedbackBatch = (projectId: number, batchId: number, data: { decision: string; comment: string }) =>
+export const reviewFeedbackBatch = (
+  projectId: number,
+  batchId: number,
+  data: { decision: string; comment: string }
+) =>
   request.post({
     url: `/ai-platform/projects/${projectId}/feedback-batches/${batchId}/review`,
     data

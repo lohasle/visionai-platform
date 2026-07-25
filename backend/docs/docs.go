@@ -729,6 +729,25 @@ const docTemplate = `{
             }
         },
         "/ai-platform/projects/{id}/collections/{collectionId}/assets": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset"
+                ],
+                "summary": "Page assets inside a collection",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            },
             "put": {
                 "security": [
                     {

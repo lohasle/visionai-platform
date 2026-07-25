@@ -57,7 +57,11 @@ export const getModelVersion = (projectId: number, versionId: number) =>
     decisions: Array<{ id: number; decision: string; comment: string; decidedBy: number }>
   }>({ url: `/ai-platform/projects/${projectId}/model-versions/${versionId}` })
 
-export const submitApproval = (projectId: number, versionId: number, data: Record<string, unknown>) =>
+export const submitApproval = (
+  projectId: number,
+  versionId: number,
+  data: Record<string, unknown>
+) =>
   request.post<ApprovalRequest>({
     url: `/ai-platform/projects/${projectId}/model-versions/${versionId}/approvals`,
     data
@@ -77,4 +81,6 @@ export const decideApproval = (
   })
 
 export const exportModelManifest = (projectId: number, versionId: number) =>
-  request.get({ url: `/ai-platform/projects/${projectId}/model-versions/${versionId}/export-manifest` })
+  request.get({
+    url: `/ai-platform/projects/${projectId}/model-versions/${versionId}/export-manifest`
+  })
