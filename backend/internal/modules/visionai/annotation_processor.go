@@ -110,7 +110,46 @@ func prepareCVATTask(ctx context.Context, db *gorm.DB, provider annotation.Provi
 		if err = provider.About(ctx); err != nil {
 			return fmt.Errorf("CVAT unavailable: %w", err)
 		}
-		external, err = provider.CreateTask(ctx, task.Name, labels, segmentSize)
+		if cvat, isCVAT := provider.(*annotation.CVAT); isCVAT {
+			bindingID := task.OntologyVersionID
+			internalType := "ONTOLOGY_VERSION"
+			if bindingID == 0 {
+				bindingID, internalType = task.ProjectID, "PROJECT"
+			}
+			var projectBinding ExternalResourceBinding
+			projectResult := db.Where(
+				"tenant_id = ? AND provider_type = ? AND internal_type = ? AND internal_id = ?",
+				task.TenantID, "CVAT", internalType, bindingID,
+			).First(&projectBinding)
+			var externalProjectID int64
+			if errors.Is(projectResult.Error, gorm.ErrRecordNotFound) {
+				var project Project
+				db.Where("tenant_id = ? AND id = ?", task.TenantID, task.ProjectID).First(&project)
+				externalProject, createErr := cvat.CreateProject(
+					ctx, fmt.Sprintf("%s · %s", project.Name, task.OntologyVersion), labels,
+				)
+				if createErr != nil {
+					return fmt.Errorf("create CVAT project: %w", createErr)
+				}
+				externalProjectID = externalProject.ID
+				projectBinding = ExternalResourceBinding{
+					TenantID: task.TenantID, ProviderType: "CVAT", InstanceID: "default",
+					InternalType: internalType, InternalID: bindingID, ExternalType: "PROJECT",
+					ExternalID:  strconv.FormatInt(externalProject.ID, 10),
+					ExternalURL: cvat.ProjectURL(externalProject.ID), SyncCursor: "READY",
+				}
+				if err = db.Create(&projectBinding).Error; err != nil {
+					return fmt.Errorf("save CVAT project binding: %w", err)
+				}
+			} else if projectResult.Error != nil {
+				return projectResult.Error
+			} else {
+				externalProjectID, _ = strconv.ParseInt(projectBinding.ExternalID, 10, 64)
+			}
+			external, err = cvat.CreateTaskInProject(ctx, task.Name, externalProjectID, segmentSize)
+		} else {
+			external, err = provider.CreateTask(ctx, task.Name, labels, segmentSize)
+		}
 		if err != nil {
 			return fmt.Errorf("create CVAT task: %w", err)
 		}

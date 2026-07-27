@@ -111,22 +111,29 @@ type WorkbenchTicket struct {
 }
 
 type PreannotationRun struct {
-	ID                uint64    `gorm:"primaryKey" json:"id"`
-	TenantID          uint64    `gorm:"index;not null" json:"tenantId"`
-	ProjectID         uint64    `gorm:"index;not null" json:"projectId"`
-	AnnotationTaskID  uint64    `gorm:"index;not null" json:"annotationTaskId"`
-	ModelVersionID    uint64    `gorm:"index;not null" json:"modelVersionId"`
-	Status            string    `gorm:"size:24;index;not null" json:"status"`
-	Parameters        string    `gorm:"type:json;not null" json:"parameters"`
-	IdempotencyKey    string    `gorm:"size:128;uniqueIndex;not null" json:"idempotencyKey"`
-	ProposedCount     int64     `json:"proposedCount"`
-	AcceptedCount     int64     `json:"acceptedCount"`
-	DeletedCount      int64     `json:"deletedCount"`
-	ModifiedCount     int64     `json:"modifiedCount"`
-	AddedCount        int64     `json:"addedCount"`
-	CorrectionSeconds int64     `json:"correctionSeconds"`
-	CreatedAt         time.Time `json:"createTime"`
-	UpdatedAt         time.Time `json:"updateTime"`
+	ID                uint64     `gorm:"primaryKey" json:"id"`
+	TenantID          uint64     `gorm:"index;not null" json:"tenantId"`
+	ProjectID         uint64     `gorm:"index;not null" json:"projectId"`
+	AnnotationTaskID  uint64     `gorm:"index;not null" json:"annotationTaskId"`
+	ModelVersionID    uint64     `gorm:"index;not null" json:"modelVersionId"`
+	Status            string     `gorm:"size:24;index;not null" json:"status"`
+	Parameters        string     `gorm:"type:json;not null" json:"parameters"`
+	IdempotencyKey    string     `gorm:"size:128;uniqueIndex;not null" json:"idempotencyKey"`
+	ProposedCount     int64      `json:"proposedCount"`
+	AcceptedCount     int64      `json:"acceptedCount"`
+	DeletedCount      int64      `json:"deletedCount"`
+	ModifiedCount     int64      `json:"modifiedCount"`
+	AddedCount        int64      `json:"addedCount"`
+	CorrectionSeconds int64      `json:"correctionSeconds"`
+	OutputSnapshot    string     `gorm:"type:longtext" json:"-"`
+	Breakdown         string     `gorm:"type:json;not null" json:"breakdown"`
+	Provider          string     `gorm:"size:32;not null;default:ORCHESTRATOR" json:"provider"`
+	ImportedAt        *time.Time `json:"importedAt"`
+	MetricsUpdatedAt  *time.Time `json:"metricsUpdatedAt"`
+	ErrorCode         string     `gorm:"size:128" json:"errorCode"`
+	ErrorMessage      string     `gorm:"size:1024" json:"errorMessage"`
+	CreatedAt         time.Time  `json:"createTime"`
+	UpdatedAt         time.Time  `json:"updateTime"`
 }
 
 func (AnnotationTask) TableName() string          { return "ai_annotation_task" }

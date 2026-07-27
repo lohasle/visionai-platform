@@ -15,12 +15,15 @@
         <el-option
           v-for="project in projects"
           :key="project.id"
-          :label="project.name"
+          :label="`${project.name} · ${project.code}`"
           :value="project.id"
         />
       </el-select>
       <el-button @click="loadAll">刷新</el-button>
       <el-button @click="runCleanup">执行保留期清理</el-button>
+      <el-button type="primary" :disabled="!annotationBatches" @click="benefitVisible = true"
+        >评估闭环收益</el-button
+      >
     </section>
     <section class="summary-grid">
       <article
@@ -101,8 +104,50 @@
               >拒绝</el-button
             ></div
           >
+          <div v-if="batch.status === 'PRIVACY_REVIEW'" class="actions">
+            <el-button type="primary" @click="startReview(batch, 'PRIVACY_APPROVE')"
+              >隐私审批</el-button
+            >
+            <el-button type="danger" plain @click="startReview(batch, 'REJECT')">拒绝</el-button>
+          </div>
         </article>
       </section>
+    </section>
+    <section class="panel benefit-panel">
+      <div class="section-title">
+        <div>
+          <h2>闭环收益证据</h2>
+          <p>在相同切片上比较基线与返标再训练版本，同时约束真实生产 QPS、错误率和 P95。</p>
+        </div>
+        <span>{{ benefits.length }} 份</span>
+      </div>
+      <el-table :data="benefits" empty-text="完成返标、再训练、评估和部署后创建第一份收益证据">
+        <el-table-column prop="feedbackBatchId" label="反馈批次" width="110">
+          <template #default="{ row }">#{{ row.feedbackBatchId }}</template>
+        </el-table-column>
+        <el-table-column label="模型版本">
+          <template #default="{ row }"
+            >#{{ row.baselineModelVersionId }} → #{{ row.candidateModelVersionId }}</template
+          >
+        </el-table-column>
+        <el-table-column label="评估运行">
+          <template #default="{ row }"
+            >#{{ row.baselineEvaluationRunId }} → #{{ row.candidateEvaluationRunId }}</template
+          >
+        </el-table-column>
+        <el-table-column prop="conclusion" label="结论" width="130">
+          <template #default="{ row }">
+            <el-tag :type="row.conclusion === 'IMPROVED' ? 'success' : 'warning'">{{
+              row.conclusion
+            }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="不可变证据摘要" min-width="210">
+          <template #default="{ row }"
+            ><code>{{ row.evidenceSha256 }}</code></template
+          >
+        </el-table-column>
+      </el-table>
     </section>
 
     <el-dialog v-model="policyVisible" title="反馈采样与隐私策略" width="600">
@@ -124,6 +169,13 @@
               :max="1"
               :step="0.01" /></el-form-item
         ></div>
+        <el-form-item label="采集前图像脱敏">
+          <el-select v-model="policyForm.redactionMode" class="full">
+            <el-option label="不修改图像（仍剥离 EXIF）" value="NONE" />
+            <el-option label="遮挡画面中心敏感区域" value="MASK_CENTER" />
+            <el-option label="整图像素化" value="PIXELATE" />
+          </el-select>
+        </el-form-item>
         <div class="form-grid"
           ><el-form-item label="每日上限"
             ><el-input-number v-model="policyForm.dailyLimit" :min="1" /></el-form-item
@@ -133,6 +185,8 @@
         <el-form-item
           ><el-checkbox v-model="policyForm.captureEmpty">采集空结果</el-checkbox
           ><el-checkbox v-model="policyForm.captureErrors">采集错误请求</el-checkbox
+          ><el-checkbox v-model="policyForm.captureManual">允许人工反馈采样</el-checkbox
+          ><el-checkbox v-model="policyForm.captureDrift">漂移触发采样</el-checkbox
           ><el-checkbox v-model="policyForm.sensitiveReview"
             >敏感项目需二次审核</el-checkbox
           ></el-form-item
@@ -159,7 +213,9 @@
         :title="
           reviewDecision === 'ACCEPT'
             ? '接受后将创建真实 CVAT 返标任务'
-            : '拒绝后样本不进入训练链路'
+            : reviewDecision === 'PRIVACY_APPROVE'
+              ? '隐私审批通过后才能进入业务审核'
+              : '拒绝后样本不进入训练链路'
         "
       />
       <el-form label-position="top" class="review-form"
@@ -171,20 +227,93 @@
         ><el-button type="primary" @click="doReview">确认决定</el-button></template
       >
     </el-dialog>
+    <el-dialog v-model="benefitVisible" title="创建闭环收益评估" width="680">
+      <el-form label-position="top">
+        <div class="form-grid">
+          <el-form-item label="反馈批次">
+            <el-select v-model="benefitForm.feedbackBatchId" class="full">
+              <el-option
+                v-for="batch in batches.filter((row) => row.annotationTaskId > 0)"
+                :key="batch.id"
+                :label="`#${batch.id} · ${batch.name}`"
+                :value="batch.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="切片">
+            <el-select v-model="benefitForm.slices" multiple allow-create filterable class="full">
+              <el-option label="all" value="all" />
+              <el-option label="small-object" value="small-object" />
+              <el-option label="occluded" value="occluded" />
+              <el-option label="dense" value="dense" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="基线评估">
+            <el-select v-model="benefitForm.baselineEvaluationRunId" class="full">
+              <el-option
+                v-for="run in successfulEvaluations"
+                :key="run.id"
+                :label="`Evaluation #${run.id}`"
+                :value="run.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="候选评估">
+            <el-select v-model="benefitForm.candidateEvaluationRunId" class="full">
+              <el-option
+                v-for="run in successfulEvaluations"
+                :key="run.id"
+                :label="`Evaluation #${run.id}`"
+                :value="run.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="基线部署">
+            <el-select v-model="benefitForm.baselineDeploymentId" class="full">
+              <el-option
+                v-for="deployment in deployments"
+                :key="deployment.id"
+                :label="`#${deployment.id} · ${deployment.name}`"
+                :value="deployment.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="候选部署">
+            <el-select v-model="benefitForm.candidateDeploymentId" class="full">
+              <el-option
+                v-for="deployment in deployments"
+                :key="deployment.id"
+                :label="`#${deployment.id} · ${deployment.name}`"
+                :value="deployment.id"
+              />
+            </el-select>
+          </el-form-item>
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="benefitVisible = false">取消</el-button>
+        <el-button type="primary" @click="doCreateBenefit">生成收益证据</el-button>
+      </template>
+    </el-dialog>
   </main>
 </template>
 
 <script lang="ts" setup>
 import { getProjectPage, type Project } from '@/api/ai-platform/projects'
+import { getEvaluationRuns, type EvaluationRun } from '@/api/ai-platform/evaluation'
+import { getDeployments, type Deployment } from '@/api/ai-platform/deployments'
 import {
   cleanupFeedback,
+  createFeedbackBenefit,
   createFeedbackBatch,
+  getFeedbackBenefits,
   getFeedbackBatches,
   getFeedbackPolicy,
   getFeedbackSamples,
   reviewFeedbackBatch,
   saveFeedbackPolicy,
   type FeedbackBatch,
+  type FeedbackBenefit,
   type FeedbackPolicy,
   type FeedbackSample
 } from '@/api/ai-platform/feedback'
@@ -196,36 +325,67 @@ const projectId = ref<number>()
 const policy = ref<FeedbackPolicy | null>()
 const samples = ref<FeedbackSample[]>([])
 const batches = ref<FeedbackBatch[]>([])
+const benefits = ref<FeedbackBenefit[]>([])
+const evaluations = ref<EvaluationRun[]>([])
+const deployments = ref<Deployment[]>([])
 const selectedIds = ref<number[]>([])
 const policyVisible = ref(false)
 const batchVisible = ref(false)
 const reviewVisible = ref(false)
+const benefitVisible = ref(false)
 const batchName = ref('生产困难样本')
 const reviewBatch = ref<FeedbackBatch>()
 const reviewDecision = ref('ACCEPT')
 const reviewComment = ref('')
+const benefitForm = reactive({
+  feedbackBatchId: undefined as number | undefined,
+  baselineEvaluationRunId: undefined as number | undefined,
+  candidateEvaluationRunId: undefined as number | undefined,
+  baselineDeploymentId: undefined as number | undefined,
+  candidateDeploymentId: undefined as number | undefined,
+  slices: ['all']
+})
 const policyForm = reactive({
   enabled: true,
   randomRate: 0,
   confidenceBelow: 0.75,
   captureEmpty: true,
   captureErrors: true,
+  captureManual: true,
+  captureDrift: true,
   dailyLimit: 1000,
   retentionDays: 30,
+  redactionMode: 'NONE',
   sensitiveReview: false
 })
 const pending = computed(() => samples.value.filter((row) => row.status === 'PENDING'))
 const annotationBatches = computed(
   () => batches.value.filter((row) => row.annotationTaskId > 0).length
 )
+const successfulEvaluations = computed(() =>
+  evaluations.value.filter((row) => row.status === 'SUCCEEDED')
+)
 const loadAll = async () => {
   if (!projectId.value) return
-  ;[policy.value, samples.value, batches.value] = await Promise.all([
-    getFeedbackPolicy(projectId.value),
-    getFeedbackSamples(projectId.value),
-    getFeedbackBatches(projectId.value)
-  ])
-  if (policy.value) Object.assign(policyForm, policy.value)
+  const deploymentPage = await getDeployments(projectId.value)
+  ;[policy.value, samples.value, batches.value, benefits.value, evaluations.value] =
+    await Promise.all([
+      getFeedbackPolicy(projectId.value),
+      getFeedbackSamples(projectId.value),
+      getFeedbackBatches(projectId.value),
+      getFeedbackBenefits(projectId.value),
+      getEvaluationRuns(projectId.value)
+    ])
+  deployments.value = deploymentPage.deployments
+  if (policy.value) {
+    Object.assign(policyForm, policy.value)
+    try {
+      const redaction = JSON.parse(policy.value.redactionPolicy || '{}')
+      policyForm.redactionMode = redaction.mode || 'NONE'
+    } catch {
+      policyForm.redactionMode = 'NONE'
+    }
+  }
 }
 const selectionChanged = (rows: FeedbackSample[]) => {
   selectedIds.value = rows.map((row) => row.id)
@@ -233,7 +393,13 @@ const selectionChanged = (rows: FeedbackSample[]) => {
 const doSavePolicy = async () => {
   policy.value = await saveFeedbackPolicy(projectId.value!, {
     ...policyForm,
-    redactionPolicy: { stripExif: true, storeRequestBody: false }
+    redactionPolicy: {
+      mode: policyForm.redactionMode,
+      stripExif: true,
+      storeRequestBody: false,
+      centerWidthRatio: 0.45,
+      centerHeightRatio: 0.3
+    }
   })
   policyVisible.value = false
   message.success('生产反馈策略已生效')
@@ -260,7 +426,22 @@ const doReview = async () => {
     comment: reviewComment.value
   })
   reviewVisible.value = false
-  message.success(reviewDecision.value === 'ACCEPT' ? '已创建真实 CVAT 返标任务' : '批次已拒绝')
+  message.success(
+    reviewDecision.value === 'ACCEPT'
+      ? '已创建真实 CVAT 返标任务'
+      : reviewDecision.value === 'PRIVACY_APPROVE'
+        ? '隐私审批已通过，批次进入业务审核'
+        : '批次已拒绝'
+  )
+  await loadAll()
+}
+const doCreateBenefit = async () => {
+  if (Object.entries(benefitForm).some(([key, value]) => key !== 'slices' && !value)) {
+    return message.warning('请选择批次、两次评估和两次部署')
+  }
+  await createFeedbackBenefit(projectId.value!, benefitForm)
+  benefitVisible.value = false
+  message.success('闭环收益证据已生成')
   await loadAll()
 }
 const runCleanup = async () => {
@@ -281,7 +462,20 @@ onMounted(async () => {
   min-height: 100%;
   padding: var(--app-content-padding);
   color: var(--text-primary);
-  background: radial-gradient(circle at 92% 0, rgb(234 88 12 / 8%), transparent 34%);
+  background: var(--el-fill-color-extra-light);
+}
+
+.benefit-panel {
+  margin-top: 18px;
+}
+
+.benefit-panel code {
+  display: block;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .page-header,

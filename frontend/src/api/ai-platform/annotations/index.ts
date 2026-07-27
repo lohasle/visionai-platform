@@ -26,6 +26,7 @@ export interface AnnotationTask {
   status: AnnotationStatus
   progress: number
   externalBindingId: number
+  preannotationRunId: number
   currentRevisionId: number
   rejectionCode: string
   rejectionReason: string
@@ -33,6 +34,43 @@ export interface AnnotationTask {
   errorMessage: string
   createTime: string
   updateTime: string
+}
+
+export interface PreannotationRun {
+  id: number
+  annotationTaskId: number
+  modelVersionId: number
+  status: string
+  parameters: string
+  proposedCount: number
+  acceptedCount: number
+  deletedCount: number
+  modifiedCount: number
+  addedCount: number
+  correctionSeconds: number
+  breakdown: string
+  provider: string
+  importedAt?: string
+  metricsUpdatedAt?: string
+  errorCode: string
+  errorMessage: string
+  createTime: string
+}
+
+export interface PreannotationComparison {
+  run: PreannotationRun
+  acceptanceRate: number
+  deletionRate: number
+  modificationRate: number
+  additionRate: number
+  unitCorrectionSeconds: number
+  breakdown: {
+    byClass?: Record<string, number>
+    byScene?: Record<string, number>
+    lowConfidenceCount?: number
+    device?: string
+    cvatTaskId?: number
+  }
 }
 
 export interface AnnotationRevision {
@@ -82,6 +120,7 @@ export const getAnnotationTask = (projectId: number, taskId: number) =>
     task: AnnotationTask
     binding: ExternalBinding
     revisions: AnnotationRevision[]
+    preannotationRuns: PreannotationRun[]
   }>({ url: `/ai-platform/projects/${projectId}/annotation-tasks/${taskId}` })
 
 export const createAnnotationTask = (
@@ -93,6 +132,8 @@ export const createAnnotationTask = (
     ontologyVersionId: number
     annotatorIds: number[]
     reviewerIds: number[]
+    planStartAt?: string
+    planEndAt?: string
   }
 ) =>
   request.post<AnnotationTask>({ url: `/ai-platform/projects/${projectId}/annotation-tasks`, data })
@@ -139,3 +180,47 @@ export const saveCVATUserMapping = (data: { platformUserId: number }) =>
 
 export const getAssetCollections = (projectId: number) =>
   request.get<AssetCollection[]>({ url: `/ai-platform/projects/${projectId}/collections` })
+
+export const createPreannotation = (
+  projectId: number,
+  taskId: number,
+  data: {
+    modelVersionId: number
+    parameters: {
+      confidence: number
+      nms: number
+      classMapping: Record<string, string>
+      batchSize: number
+      device: 'GPU' | 'CPU'
+      lowConfidencePolicy: 'DROP' | 'KEEP_REVIEW'
+      lowConfidenceFloor: number
+    }
+  }
+) =>
+  request.post({
+    url: `/ai-platform/projects/${projectId}/annotation-tasks/${taskId}/preannotations`,
+    data
+  })
+
+export const updatePreannotationMetrics = (
+  projectId: number,
+  taskId: number,
+  runId: number,
+  data: {
+    proposedCount: number
+    acceptedCount: number
+    deletedCount: number
+    modifiedCount: number
+    addedCount: number
+    correctionSeconds: number
+  }
+) =>
+  request.put({
+    url: `/ai-platform/projects/${projectId}/annotation-tasks/${taskId}/preannotations/${runId}/metrics`,
+    data
+  })
+
+export const getPreannotationComparisons = (projectId: number) =>
+  request.get<PreannotationComparison[]>({
+    url: `/ai-platform/projects/${projectId}/preannotations/compare`
+  })

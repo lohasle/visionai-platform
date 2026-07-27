@@ -16,7 +16,7 @@
         <el-option
           v-for="project in projects"
           :key="project.id"
-          :label="project.name"
+          :label="`${project.name} · ${project.code}`"
           :value="project.id"
         />
       </el-select>
@@ -101,6 +101,9 @@
           >
         </dl>
         <div class="service-actions">
+          <el-button @click="openRevisionDialog">
+            <Icon icon="lucide:git-commit-horizontal" :size="15" />创建配置修订
+          </el-button>
           <el-button
             v-if="detail.deployment.status === 'RUNNING'"
             :loading="controlling"
@@ -132,6 +135,34 @@
           ><small>平均置信度</small><strong>{{ format(detail.metrics.meanConfidence) }}</strong
           ><span>空结果率 {{ percent(detail.metrics.emptyRate) }}</span></article
         >
+      </section>
+
+      <section class="drift-strip" :class="`drift-${detail.drift.status.toLowerCase()}`">
+        <div>
+          <span>MODEL DRIFT</span>
+          <strong>{{ driftStatusLabel(detail.drift.status) }}</strong>
+          <small>
+            {{
+              detail.drift.windowMinutes
+                ? `${detail.drift.windowMinutes} 分钟窗口 · ${detail.drift.sampleCount} 个样本`
+                : '尚未建立生产基线'
+            }}
+          </small>
+        </div>
+        <dl v-if="detail.drift.classPSI !== undefined">
+          <div
+            ><dt>类别 PSI</dt><dd>{{ format(detail.drift.classPSI) }}</dd></div
+          >
+          <div
+            ><dt>置信度变化</dt><dd>{{ signed(detail.drift.confidenceDelta) }}</dd></div
+          >
+          <div
+            ><dt>空结果率变化</dt><dd>{{ signedPercent(detail.drift.emptyRateDelta) }}</dd></div
+          >
+        </dl>
+        <el-button @click="baselineVisible = true">
+          {{ detail.drift.status === 'BASELINE_REQUIRED' ? '建立基线' : '更新基线' }}
+        </el-button>
       </section>
 
       <section class="workspace">
@@ -291,6 +322,18 @@
                 formatTime(row.createTime)
               }}</template></el-table-column
             >
+            <el-table-column label="反馈" width="90">
+              <template #default="{ row }">
+                <el-button
+                  link
+                  type="primary"
+                  :disabled="!row.assetId"
+                  @click="manualFeedback(row.traceId)"
+                >
+                  加入反馈
+                </el-button>
+              </template>
+            </el-table-column>
           </el-table>
         </section>
 
@@ -331,12 +374,34 @@
           <div class="alerts-title"
             ><h3>告警事件</h3><span>{{ detail.alerts.length }} 条</span></div
           >
+          <div v-if="detail.alertRules.length" class="rule-list">
+            <article v-for="rule in detail.alertRules" :key="rule.id">
+              <div>
+                <b>{{ rule.name }}</b>
+                <span
+                  >{{ rule.metric }} {{ rule.operator }} {{ rule.threshold }} · 持续
+                  {{ rule.durationSeconds }}s · {{ rule.notificationChannel }} · 接收人
+                  {{ parseRecipientCount(rule.recipients) }} 位</span
+                >
+                <small v-if="rule.silencedUntil"
+                  >静默至 {{ formatTime(rule.silencedUntil) }} · {{ rule.silenceReason }}</small
+                >
+              </div>
+              <el-button link @click="startSilence(rule.id)">静默</el-button>
+            </article>
+          </div>
           <div v-for="alert in detail.alerts" :key="alert.id" class="alert-row">
             <div
               ><b>{{ alert.message }}</b
-              ><span>{{ alert.status }} · {{ formatTime(alert.createTime) }}</span></div
+              ><span
+                >{{ alert.status }} · {{ alert.notificationChannel }} ·
+                {{ formatTime(alert.createTime) }}</span
+              ><small v-if="alert.resolution">{{ alert.resolution }}</small></div
             >
-            <el-button v-if="alert.status === 'OPEN'" link @click="ack(alert.id)">确认</el-button>
+            <div v-if="alert.status === 'OPEN' || alert.status === 'ACKNOWLEDGED'">
+              <el-button v-if="alert.status === 'OPEN'" link @click="ack(alert.id)">确认</el-button>
+              <el-button link type="success" @click="startResolve(alert.id)">处置</el-button>
+            </div>
           </div>
           <el-empty v-if="!detail.alerts.length" :image-size="60" description="当前没有告警事件" />
         </section>
@@ -359,9 +424,16 @@
               <el-option label="预发" value="STAGING" />
             </el-select>
           </el-form-item>
-          <el-form-item label="ModelVersion ID"
-            ><el-input-number v-model="createForm.modelVersionId" :min="1"
-          /></el-form-item>
+          <el-form-item label="模型版本">
+            <el-select v-model="createForm.modelVersionId" class="full">
+              <el-option
+                v-for="version in modelVersions"
+                :key="version.id"
+                :label="`${version.semanticVersion} · ${version.status} · #${version.id}`"
+                :value="version.id"
+              />
+            </el-select>
+          </el-form-item>
         </div>
         <el-form-item label="置信度阈值">
           <el-slider
@@ -376,6 +448,52 @@
       <template #footer>
         <el-button @click="createVisible = false">取消</el-button>
         <el-button type="primary" :loading="creating" @click="doCreate">创建并发布</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="revisionVisible" title="创建不可变部署修订" width="600">
+      <el-alert
+        type="info"
+        :closable="false"
+        title="生产修订会重新校验模型审批指纹；每次配置变化都生成新 Revision。"
+      />
+      <el-form label-position="top" class="dialog-form">
+        <el-form-item label="模型版本">
+          <el-select v-model="revisionForm.modelVersionId" class="full">
+            <el-option
+              v-for="version in modelVersions"
+              :key="version.id"
+              :label="`${version.semanticVersion} · ${version.status} · #${version.id}`"
+              :value="version.id"
+            />
+          </el-select>
+        </el-form-item>
+        <div class="form-grid">
+          <el-form-item label="副本数">
+            <el-input-number v-model="revisionForm.replicas" :min="1" :max="32" />
+          </el-form-item>
+          <el-form-item label="最大批量">
+            <el-input-number v-model="revisionForm.maxBatchSize" :min="1" :max="256" />
+          </el-form-item>
+        </div>
+        <el-form-item label="置信度阈值">
+          <el-slider
+            v-model="revisionForm.confidenceThreshold"
+            :min="0"
+            :max="1"
+            :step="0.05"
+            show-input
+          />
+        </el-form-item>
+        <el-form-item label="配置变更原因（写入审计）">
+          <el-input v-model.trim="revisionForm.changeReason" type="textarea" :rows="3" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="revisionVisible = false">取消</el-button>
+        <el-button type="primary" :loading="creatingRevision" @click="doCreateRevision">
+          创建并发布
+        </el-button>
       </template>
     </el-dialog>
 
@@ -400,27 +518,91 @@
             </div>
           </el-form-item>
         </div>
+        <el-form-item label="通知渠道">
+          <el-select v-model="alertForm.notificationChannel" class="full">
+            <el-option label="工作台通知" value="IN_APP" />
+            <el-option label="审计事件" value="AUDIT" />
+          </el-select>
+        </el-form-item>
+        <div class="form-grid">
+          <el-form-item label="持续时间（秒）">
+            <el-input-number v-model="alertForm.durationSeconds" :min="0" :max="86400" />
+          </el-form-item>
+          <el-form-item label="接收人 User ID（逗号分隔）">
+            <el-input v-model.trim="alertForm.recipientsText" placeholder="例如 1,3,7" />
+          </el-form-item>
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="alertVisible = false">取消</el-button>
         <el-button type="primary" :loading="creatingAlert" @click="doCreateAlert">创建</el-button>
       </template>
     </el-dialog>
+    <el-dialog v-model="baselineVisible" title="建立漂移基线" width="440">
+      <el-form label-position="top">
+        <el-form-item label="滚动观察窗口（分钟）">
+          <el-input-number v-model="baselineWindowMinutes" :min="5" :max="43200" />
+        </el-form-item>
+        <p class="dialog-note"
+          >当前成功推理样本将被冻结为基线，后续窗口按类别分布、置信度和空结果率持续比较。</p
+        >
+      </el-form>
+      <template #footer>
+        <el-button @click="baselineVisible = false">取消</el-button>
+        <el-button type="primary" @click="doSaveBaseline">保存基线</el-button>
+      </template>
+    </el-dialog>
+    <el-dialog v-model="silenceVisible" title="静默告警规则" width="460">
+      <el-form label-position="top">
+        <el-form-item label="静默时长（分钟）"
+          ><el-input-number v-model="silenceForm.durationMinutes" :min="1" :max="10080"
+        /></el-form-item>
+        <el-form-item label="原因"
+          ><el-input v-model="silenceForm.reason" type="textarea" :rows="3"
+        /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="silenceVisible = false">取消</el-button>
+        <el-button type="primary" @click="doSilence">确认静默</el-button>
+      </template>
+    </el-dialog>
+    <el-dialog v-model="resolveVisible" title="处置告警" width="460">
+      <el-form label-position="top">
+        <el-form-item label="处置结论"
+          ><el-input
+            v-model="resolution"
+            type="textarea"
+            :rows="4"
+            placeholder="记录根因、操作和验证结果"
+        /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="resolveVisible = false">取消</el-button>
+        <el-button type="primary" @click="doResolve">完成处置</el-button>
+      </template>
+    </el-dialog>
   </main>
 </template>
 
 <script lang="ts" setup>
+import { ElMessageBox } from 'element-plus'
 import { getProjectPage, type Project } from '@/api/ai-platform/projects'
+import { getModels, type ModelVersion } from '@/api/ai-platform/models'
 import {
   acknowledgeAlert,
+  captureManualFeedback,
   createAlertRule,
   createDeployment,
+  createDeploymentRevision,
   getDeployment,
   getDeployments,
   predict,
   predictImage,
+  resolveAlert,
   restartDeployment,
   rollbackDeployment,
+  saveDriftBaseline,
+  silenceAlertRule,
   stopDeployment,
   type Deployment,
   type ImageRegressionResponse,
@@ -432,19 +614,29 @@ const message = useMessage()
 const projects = ref<Project[]>([])
 const projectId = ref<number>()
 const deployments = ref<Deployment[]>([])
+const modelVersions = ref<ModelVersion[]>([])
 const selected = ref<Deployment>()
 const detail = ref<Awaited<ReturnType<typeof getDeployment>>>()
 const assetPrediction = ref<PredictionResponse>()
 const regressionPrediction = ref<ImageRegressionResponse>()
 const activePrediction = computed(() => regressionPrediction.value || assetPrediction.value)
 const createVisible = ref(false)
+const revisionVisible = ref(false)
 const alertVisible = ref(false)
+const baselineVisible = ref(false)
+const silenceVisible = ref(false)
+const resolveVisible = ref(false)
 const loading = ref(false)
 const predicting = ref(false)
 const creating = ref(false)
+const creatingRevision = ref(false)
 const creatingAlert = ref(false)
 const controlling = ref(false)
 const rollingBackId = ref<number>()
+const selectedRuleId = ref<number>()
+const selectedAlertId = ref<number>()
+const baselineWindowMinutes = ref(60)
+const resolution = ref('')
 const testMode = ref<'upload' | 'asset'>('upload')
 const selectedFile = ref<File>()
 const uploadRef = ref<{ clearFiles: () => void }>()
@@ -458,15 +650,37 @@ const createForm = reactive({
   modelVersionId: 2,
   confidenceThreshold: 0.5
 })
+const revisionForm = reactive({
+  modelVersionId: 0,
+  replicas: 1,
+  maxBatchSize: 8,
+  confidenceThreshold: 0.5,
+  changeReason: ''
+})
 const alertForm = reactive({
   name: 'P95 延迟过高',
   metric: 'LATENCY_MS',
   operator: '>',
-  threshold: 100
+  threshold: 100,
+  notificationChannel: 'IN_APP',
+  durationSeconds: 0,
+  recipientsText: ''
 })
+const silenceForm = reactive({ durationMinutes: 60, reason: '' })
 
 const format = (value = 0) => Number(value).toFixed(2)
 const percent = (value = 0) => `${(Number(value) * 100).toFixed(1)}%`
+const signed = (value = 0) => `${Number(value) >= 0 ? '+' : ''}${Number(value).toFixed(3)}`
+const signedPercent = (value = 0) =>
+  `${Number(value) >= 0 ? '+' : ''}${(Number(value) * 100).toFixed(1)}%`
+const driftStatusLabel = (value: string) =>
+  ({
+    BASELINE_REQUIRED: '待建立基线',
+    NO_CURRENT_SAMPLES: '等待窗口样本',
+    STABLE: '稳定',
+    WATCH: '需要关注',
+    DRIFTED: '检测到漂移'
+  })[value] || value
 const formatTime = (value?: string) => {
   if (!value) return '—'
   const date = new Date(value)
@@ -480,6 +694,13 @@ const formatTime = (value?: string) => {
         second: '2-digit',
         hour12: false
       }).format(date)
+}
+const parseRecipientCount = (value = '[]') => {
+  try {
+    return JSON.parse(value).length
+  } catch {
+    return 0
+  }
 }
 const environmentLabel = (value: string) =>
   ({
@@ -538,8 +759,15 @@ const loadAll = async (background = false) => {
   if (!projectId.value) return
   if (!background) loading.value = true
   try {
-    const data = await getDeployments(projectId.value)
+    const [data, registry] = await Promise.all([
+      getDeployments(projectId.value),
+      getModels(projectId.value)
+    ])
     deployments.value = data.deployments
+    modelVersions.value = registry.versions
+    if (!modelVersions.value.some((version) => version.id === createForm.modelVersionId)) {
+      createForm.modelVersionId = modelVersions.value[0]?.id || 0
+    }
     selected.value =
       deployments.value.find((row) => row.id === selected.value?.id) || deployments.value[0]
     detail.value = selected.value
@@ -573,6 +801,45 @@ const doCreate = async () => {
     await loadAll()
   } finally {
     creating.value = false
+  }
+}
+const openRevisionDialog = () => {
+  const current = detail.value?.revisions.find(
+    (revision) => revision.id === detail.value?.deployment.currentRevisionId
+  )
+  revisionForm.modelVersionId = current?.modelVersionId || modelVersions.value[0]?.id || 0
+  try {
+    const config = JSON.parse(current?.config || '{}') as Record<string, number>
+    revisionForm.replicas = Number(config.replicas || 1)
+    revisionForm.maxBatchSize = Number(config.maxBatchSize || 8)
+    revisionForm.confidenceThreshold = Number(config.confidenceThreshold ?? 0.5)
+  } catch {
+    revisionForm.replicas = 1
+    revisionForm.maxBatchSize = 8
+    revisionForm.confidenceThreshold = 0.5
+  }
+  revisionForm.changeReason = ''
+  revisionVisible.value = true
+}
+const doCreateRevision = async () => {
+  if (!projectId.value || !selected.value || !revisionForm.modelVersionId) return
+  if (!revisionForm.changeReason) return message.warning('配置变更原因必填')
+  creatingRevision.value = true
+  try {
+    await createDeploymentRevision(projectId.value, selected.value.id, {
+      modelVersionId: revisionForm.modelVersionId,
+      changeReason: revisionForm.changeReason,
+      config: {
+        replicas: revisionForm.replicas,
+        maxBatchSize: revisionForm.maxBatchSize,
+        confidenceThreshold: revisionForm.confidenceThreshold
+      }
+    })
+    revisionVisible.value = false
+    message.success('不可变部署修订已创建并进入发布队列')
+    await loadAll()
+  } finally {
+    creatingRevision.value = false
   }
 }
 const handleImageChange = (uploadFile: { raw?: File; size?: number }) => {
@@ -626,10 +893,18 @@ const runAssetPrediction = async () => {
 }
 const rollback = async (revisionId: number) => {
   if (!selected.value || !projectId.value) return
-  await message.confirm('回滚会基于目标模型创建新的不可变修订，是否继续？')
+  const { value } = await ElMessageBox.prompt(
+    '回滚会创建新的不可变修订，并自动关联生产审批。请填写回滚原因。',
+    '回滚部署',
+    {
+      confirmButtonText: '创建回滚修订',
+      cancelButtonText: '取消',
+      inputValidator: (input) => Boolean(input?.trim()) || '回滚原因必填'
+    }
+  )
   rollingBackId.value = revisionId
   try {
-    await rollbackDeployment(projectId.value, selected.value.id, revisionId)
+    await rollbackDeployment(projectId.value, selected.value.id, revisionId, value.trim())
     message.success('回滚修订已创建')
     await loadAll()
   } finally {
@@ -666,7 +941,19 @@ const doCreateAlert = async () => {
   }
   creatingAlert.value = true
   try {
-    await createAlertRule(projectId.value, selected.value.id, alertForm)
+    const recipients = alertForm.recipientsText
+      .split(',')
+      .map((value) => Number(value.trim()))
+      .filter((value) => Number.isInteger(value) && value > 0)
+    await createAlertRule(projectId.value, selected.value.id, {
+      name: alertForm.name,
+      metric: alertForm.metric,
+      operator: alertForm.operator,
+      threshold: alertForm.threshold,
+      notificationChannel: alertForm.notificationChannel,
+      durationSeconds: alertForm.durationSeconds,
+      recipients
+    })
     alertVisible.value = false
     message.success('告警规则已启用')
     await refreshDetail(selected.value.id)
@@ -674,9 +961,58 @@ const doCreateAlert = async () => {
     creatingAlert.value = false
   }
 }
+const manualFeedback = async (traceId: string) => {
+  if (!projectId.value) return
+  const { value } = await ElMessageBox.prompt(
+    '说明为什么该样本需要进入反馈闭环。',
+    '人工反馈采样',
+    {
+      confirmButtonText: '加入反馈池',
+      cancelButtonText: '取消',
+      inputValidator: (input) => Boolean(input?.trim()) || '反馈说明必填'
+    }
+  )
+  await captureManualFeedback(projectId.value, traceId, value.trim())
+  message.success('样本已进入反馈池')
+}
 const ack = async (alertId: number) => {
   if (!selected.value || !projectId.value) return
   await acknowledgeAlert(projectId.value, alertId)
+  await refreshDetail(selected.value.id)
+}
+const doSaveBaseline = async () => {
+  if (!selected.value || !projectId.value) return
+  await saveDriftBaseline(projectId.value, selected.value.id, baselineWindowMinutes.value)
+  baselineVisible.value = false
+  message.success('漂移基线已建立')
+  await refreshDetail(selected.value.id)
+}
+const startSilence = (ruleId: number) => {
+  selectedRuleId.value = ruleId
+  silenceForm.reason = ''
+  silenceVisible.value = true
+}
+const doSilence = async () => {
+  if (!selected.value || !projectId.value || !selectedRuleId.value || !silenceForm.reason.trim()) {
+    return message.warning('请填写静默原因')
+  }
+  await silenceAlertRule(projectId.value, selected.value.id, selectedRuleId.value, silenceForm)
+  silenceVisible.value = false
+  message.success('告警规则已静默')
+  await refreshDetail(selected.value.id)
+}
+const startResolve = (alertId: number) => {
+  selectedAlertId.value = alertId
+  resolution.value = ''
+  resolveVisible.value = true
+}
+const doResolve = async () => {
+  if (!selected.value || !projectId.value || !selectedAlertId.value || !resolution.value.trim()) {
+    return message.warning('请填写处置结论')
+  }
+  await resolveAlert(projectId.value, selectedAlertId.value, resolution.value)
+  resolveVisible.value = false
+  message.success('告警已完成处置')
   await refreshDetail(selected.value.id)
 }
 
@@ -926,6 +1262,97 @@ code {
   color: var(--text-secondary);
 }
 
+.drift-strip {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  gap: 24px;
+  align-items: center;
+  margin-bottom: 18px;
+  padding: 16px 18px;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-left: 4px solid var(--el-color-info);
+  border-radius: 10px;
+}
+
+.drift-strip > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.drift-strip > div > span,
+.drift-strip small {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.drift-strip.drift-stable {
+  border-left-color: var(--el-color-success);
+}
+
+.drift-strip.drift-watch {
+  border-left-color: var(--el-color-warning);
+}
+
+.drift-strip.drift-drifted {
+  border-left-color: var(--el-color-danger);
+}
+
+.drift-strip dl {
+  display: flex;
+  gap: 22px;
+  margin: 0;
+}
+
+.drift-strip dl div {
+  display: flex;
+  flex-direction: column;
+}
+
+.drift-strip dt {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.drift-strip dd {
+  margin: 2px 0 0;
+  font-weight: 700;
+}
+
+.rule-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.rule-list article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--el-fill-color-lighter);
+  border-radius: 8px;
+}
+
+.rule-list article > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rule-list span,
+.rule-list small {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.dialog-note {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.65fr);
@@ -1132,6 +1559,14 @@ code {
 
   .inference-status dl {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .drift-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .drift-strip dl {
+    flex-wrap: wrap;
   }
 }
 

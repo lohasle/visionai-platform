@@ -42,6 +42,8 @@ x-cvat-worker: &cvat-worker
     start_period: 30s
 
 x-visionai-app-env: &visionai-app-env
+  NIMBUS_ENVIRONMENT: ${NIMBUS_ENVIRONMENT:-DEVELOPMENT}
+  NIMBUS_ENABLE_PRODUCTION_LOCAL_DOCKER: ${NIMBUS_ENABLE_PRODUCTION_LOCAL_DOCKER:-false}
   NIMBUS_HTTP_ADDR: ":58080"
   NIMBUS_DB_DSN: "nimbus:nimbus_dev@tcp(mysql:3306)/nimbus_platform_go?charset=utf8mb4&parseTime=True&loc=Local"
   NIMBUS_RABBITMQ_URL: "amqp://visionai:visionai_dev@rabbitmq:5672/"

@@ -43,6 +43,8 @@ type TrainingTemplateVersion struct {
 	ResourceRequirements string     `gorm:"type:json;not null" json:"resourceRequirements"`
 	Compatibility        string     `gorm:"type:json;not null" json:"compatibility"`
 	LicensePolicy        string     `gorm:"type:json;not null" json:"licensePolicy"`
+	SourceYAML           string     `gorm:"type:longtext" json:"sourceYaml"`
+	SourceYAMLSHA256     string     `gorm:"size:64" json:"sourceYamlSha256"`
 	Published            bool       `gorm:"index;not null;default:false" json:"published"`
 	SmokeStatus          string     `gorm:"size:24;index;not null" json:"smokeStatus"`
 	SmokeReport          string     `gorm:"type:json;not null" json:"smokeReport"`

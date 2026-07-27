@@ -3,6 +3,7 @@ package visionai
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -29,8 +30,18 @@ type datasetVersionRequest struct {
 	AnnotationRevisionID uint64             `json:"annotationRevisionId"`
 	OntologyVersionID    uint64             `json:"ontologyVersionId"`
 	OntologyVersion      string             `json:"ontologyVersion"`
+	SplitMode            string             `json:"splitMode"`
 	SplitSeed            int64              `json:"splitSeed"`
 	Split                map[string]float64 `json:"split"`
+	SplitRules           []datasetSplitRule `json:"splitRules"`
+	ExternalAssignments  map[string]string  `json:"externalAssignments"`
+}
+
+type datasetSplitRule struct {
+	Field    string `json:"field"`
+	Operator string `json:"operator"`
+	Value    string `json:"value"`
+	Split    string `json:"split"`
 }
 
 func (h *Handler) getDataset(c *gin.Context, project Project) (Dataset, bool) {
@@ -138,6 +149,131 @@ func splitFor(seed int64, assetID uint64, split map[string]float64) string {
 	return "TEST"
 }
 
+func normalizeDatasetSplitName(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	if value == "TRAIN" || value == "VAL" || value == "TEST" {
+		return value
+	}
+	return ""
+}
+
+func datasetAssetField(asset Asset, field string) string {
+	switch strings.ToLower(strings.TrimSpace(field)) {
+	case "filename":
+		return asset.Filename
+	case "contenttype", "content_type":
+		return asset.ContentType
+	case "mediakind", "media_kind":
+		return asset.MediaKind
+	case "sourcedevice", "source_device":
+		return asset.SourceDevice
+	case "businessscene", "business_scene":
+		return asset.BusinessScene
+	case "width":
+		return strconv.Itoa(asset.Width)
+	case "height":
+		return strconv.Itoa(asset.Height)
+	case "size":
+		return strconv.FormatInt(asset.Size, 10)
+	}
+	if strings.HasPrefix(strings.ToLower(field), "metadata.") {
+		var metadata map[string]any
+		_ = json.Unmarshal([]byte(asset.Metadata), &metadata)
+		key := strings.TrimSpace(field[len("metadata."):])
+		return fmt.Sprint(metadata[key])
+	}
+	return ""
+}
+
+func datasetRuleMatches(actual string, rule datasetSplitRule) bool {
+	operator := strings.ToUpper(strings.TrimSpace(rule.Operator))
+	expected := strings.TrimSpace(rule.Value)
+	switch operator {
+	case "EQ", "=":
+		return strings.EqualFold(actual, expected)
+	case "NE", "!=":
+		return !strings.EqualFold(actual, expected)
+	case "CONTAINS":
+		return strings.Contains(strings.ToLower(actual), strings.ToLower(expected))
+	case "PREFIX":
+		return strings.HasPrefix(strings.ToLower(actual), strings.ToLower(expected))
+	case "SUFFIX":
+		return strings.HasSuffix(strings.ToLower(actual), strings.ToLower(expected))
+	case "IN":
+		for _, candidate := range strings.Split(expected, ",") {
+			if strings.EqualFold(actual, strings.TrimSpace(candidate)) {
+				return true
+			}
+		}
+		return false
+	case "GT", "GTE", "LT", "LTE":
+		left, leftErr := strconv.ParseFloat(actual, 64)
+		right, rightErr := strconv.ParseFloat(expected, 64)
+		if leftErr != nil || rightErr != nil {
+			return false
+		}
+		switch operator {
+		case "GT":
+			return left > right
+		case "GTE":
+			return left >= right
+		case "LT":
+			return left < right
+		default:
+			return left <= right
+		}
+	default:
+		return false
+	}
+}
+
+func resolveDatasetSplits(req datasetVersionRequest, assets []Asset, ratios map[string]float64) (map[uint64]string, any, error) {
+	mode := strings.ToUpper(strings.TrimSpace(req.SplitMode))
+	if mode == "" {
+		mode = "RATIO"
+	}
+	assignments := make(map[uint64]string, len(assets))
+	switch mode {
+	case "RATIO":
+		for _, asset := range assets {
+			assignments[asset.ID] = splitFor(req.SplitSeed, asset.ID, ratios)
+		}
+		return assignments, gin.H{"mode": mode, "seed": req.SplitSeed, "ratios": ratios}, nil
+	case "RULE":
+		if len(req.SplitRules) == 0 {
+			return nil, nil, fmt.Errorf("规则切分至少需要一条规则")
+		}
+		for _, rule := range req.SplitRules {
+			if normalizeDatasetSplitName(rule.Split) == "" || strings.TrimSpace(rule.Field) == "" {
+				return nil, nil, fmt.Errorf("切分规则的 field 和 TRAIN/VAL/TEST split 必填")
+			}
+		}
+		for _, asset := range assets {
+			for _, rule := range req.SplitRules {
+				if datasetRuleMatches(datasetAssetField(asset, rule.Field), rule) {
+					assignments[asset.ID] = normalizeDatasetSplitName(rule.Split)
+					break
+				}
+			}
+			if assignments[asset.ID] == "" {
+				return nil, nil, fmt.Errorf("资产 #%d 未命中任何切分规则", asset.ID)
+			}
+		}
+		return assignments, gin.H{"mode": mode, "rules": req.SplitRules}, nil
+	case "EXTERNAL_LIST":
+		for _, asset := range assets {
+			split := normalizeDatasetSplitName(req.ExternalAssignments[strconv.FormatUint(asset.ID, 10)])
+			if split == "" {
+				return nil, nil, fmt.Errorf("外部列表缺少资产 #%d 的 TRAIN/VAL/TEST 分配", asset.ID)
+			}
+			assignments[asset.ID] = split
+		}
+		return assignments, gin.H{"mode": mode, "assignments": req.ExternalAssignments}, nil
+	default:
+		return nil, nil, fmt.Errorf("splitMode 必须是 RATIO、RULE 或 EXTERNAL_LIST")
+	}
+}
+
 // DatasetVersionCreate godoc
 // @Summary Create a reproducible dataset version
 // @Tags VisionAI Dataset
@@ -189,10 +325,65 @@ func (h *Handler) DatasetVersionCreate(c *gin.Context) {
 			req.OntologyVersionID = parent.OntologyVersionID
 		}
 		h.db.Model(&DatasetVersionItem{}).Where("tenant_id = ? AND dataset_version_id = ?", project.TenantID, parent.ID).Order("id").Pluck("asset_id", &assetIDs)
+	case "ANNOTATION_REVISION":
+		var revision AnnotationRevision
+		revisionID := req.SourceID
+		if revisionID == 0 {
+			revisionID = req.AnnotationRevisionID
+		}
+		if revisionID == 0 || h.db.Where("tenant_id = ? AND project_id = ? AND id = ?", project.TenantID, project.ID, revisionID).First(&revision).Error != nil {
+			httpx.Fail(c, 409, 409, "标注修订不存在或不属于当前项目")
+			return
+		}
+		var task AnnotationTask
+		if h.db.Where("tenant_id = ? AND project_id = ? AND id = ?", project.TenantID, project.ID, revision.AnnotationTaskID).First(&task).Error != nil {
+			httpx.Fail(c, 409, 409, "标注修订缺少有效任务血缘")
+			return
+		}
+		req.SourceID, req.AnnotationRevisionID = revision.ID, revision.ID
+		if req.OntologyVersionID == 0 {
+			req.OntologyVersionID = revision.OntologyVersionID
+		}
+		h.db.Model(&AssetCollectionItem{}).Where("tenant_id = ? AND project_id = ? AND collection_id = ?", project.TenantID, project.ID, task.CollectionID).Order("id").Pluck("asset_id", &assetIDs)
+	case "FEEDBACK_BATCH":
+		var batch FeedbackBatch
+		if req.SourceID == 0 || h.db.Where("tenant_id = ? AND project_id = ? AND id = ? AND status IN ?", project.TenantID, project.ID, req.SourceID, []string{"ANNOTATING", "COMPLETED"}).First(&batch).Error != nil {
+			httpx.Fail(c, 409, 409, "反馈批次不存在、未通过审核或不属于当前项目")
+			return
+		}
+		h.db.Model(&FeedbackSample{}).Where("tenant_id = ? AND project_id = ? AND batch_id = ? AND status = ?", project.TenantID, project.ID, batch.ID, "ACCEPTED").Order("id").Pluck("asset_id", &assetIDs)
+		if batch.AnnotationRevisionID != 0 {
+			req.AnnotationRevisionID = batch.AnnotationRevisionID
+		}
+		if req.OntologyVersionID == 0 && batch.AnnotationTaskID != 0 {
+			var task AnnotationTask
+			if h.db.Where("tenant_id = ? AND project_id = ? AND id = ?", project.TenantID, project.ID, batch.AnnotationTaskID).First(&task).Error == nil {
+				req.OntologyVersionID = task.OntologyVersionID
+			}
+		}
+		if req.OntologyVersionID == 0 && batch.DatasetVersionID != 0 {
+			var sourceVersion DatasetVersion
+			if h.db.Where("tenant_id = ? AND project_id = ? AND id = ?", project.TenantID, project.ID, batch.DatasetVersionID).First(&sourceVersion).Error == nil {
+				req.OntologyVersionID = sourceVersion.OntologyVersionID
+			}
+		}
 	default:
-		httpx.Fail(c, 400, 400, "sourceType 必须是 COLLECTION 或 PARENT_VERSION")
+		httpx.Fail(c, 400, 400, "sourceType 必须是 COLLECTION、ANNOTATION_REVISION、PARENT_VERSION 或 FEEDBACK_BATCH")
 		return
 	}
+	seenAssetIDs := make(map[uint64]struct{}, len(assetIDs))
+	uniqueAssetIDs := make([]uint64, 0, len(assetIDs))
+	for _, assetID := range assetIDs {
+		if assetID == 0 {
+			continue
+		}
+		if _, exists := seenAssetIDs[assetID]; exists {
+			continue
+		}
+		seenAssetIDs[assetID] = struct{}{}
+		uniqueAssetIDs = append(uniqueAssetIDs, assetID)
+	}
+	assetIDs = uniqueAssetIDs
 	if len(assetIDs) == 0 {
 		httpx.Fail(c, 409, 409, "数据源不包含资产")
 		return
@@ -216,6 +407,16 @@ func (h *Handler) DatasetVersionCreate(c *gin.Context) {
 		httpx.Fail(c, 409, 409, ontologyErr.Error())
 		return
 	}
+	var assets []Asset
+	if err := h.db.Where("tenant_id = ? AND project_id = ? AND id IN ? AND status = ?", project.TenantID, project.ID, assetIDs, AssetReady).Order("id").Find(&assets).Error; err != nil || len(assets) != len(assetIDs) {
+		httpx.Fail(c, 409, 409, "数据源包含不可用、已删除或跨项目资产")
+		return
+	}
+	assignments, splitConfig, splitErr := resolveDatasetSplits(req, assets, split)
+	if splitErr != nil {
+		httpx.Fail(c, 400, 400, splitErr.Error())
+		return
+	}
 	var version DatasetVersion
 	err := h.db.Transaction(func(tx *gorm.DB) error {
 		var latest DatasetVersion
@@ -227,7 +428,7 @@ func (h *Handler) DatasetVersionCreate(c *gin.Context) {
 			SourceID: req.SourceID, AnnotationRevisionID: req.AnnotationRevisionID,
 			OntologyVersionID: ontologyVersion.ID, OntologyVersion: ontologyVersion.SemanticVersion,
 			OntologyChecksum: ontologyVersion.Checksum,
-			SplitSeed:        req.SplitSeed, SplitConfig: jsonValue(split), Status: DatasetVersionDraft,
+			SplitSeed:        req.SplitSeed, SplitConfig: jsonValue(splitConfig), Status: DatasetVersionDraft,
 			ItemCount: int64(len(assetIDs)), ValidationSummary: "{}",
 			CreatedBy: c.GetUint64("user_id"),
 		}
@@ -237,7 +438,7 @@ func (h *Handler) DatasetVersionCreate(c *gin.Context) {
 		for _, assetID := range assetIDs {
 			item := DatasetVersionItem{
 				TenantID: project.TenantID, ProjectID: project.ID, DatasetVersionID: version.ID,
-				AssetID: assetID, Split: splitFor(req.SplitSeed, assetID, split), Source: req.SourceType,
+				AssetID: assetID, Split: assignments[assetID], Source: req.SourceType,
 			}
 			if err := tx.Create(&item).Error; err != nil {
 				return err

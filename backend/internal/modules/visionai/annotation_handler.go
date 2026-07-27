@@ -181,6 +181,10 @@ func (h *Handler) AnnotationTaskCreate(c *gin.Context) {
 		httpx.Fail(c, 400, 400, "名称、资产集合、已发布类别体系版本、标注员和审核员必填")
 		return
 	}
+	if req.PlanStartAt != nil && req.PlanEndAt != nil && !req.PlanEndAt.After(*req.PlanStartAt) {
+		httpx.Fail(c, 400, 400, "计划完成时间必须晚于计划开始时间")
+		return
+	}
 	var collection AssetCollection
 	if h.db.Where("tenant_id = ? AND project_id = ? AND id = ? AND frozen = ?", project.TenantID, project.ID, req.CollectionID, true).First(&collection).Error != nil {
 		httpx.Fail(c, 409, 409, "标注任务只能引用已冻结资产集合")
@@ -566,6 +570,37 @@ type preannotationRequest struct {
 	Parameters     map[string]any `json:"parameters"`
 }
 
+type preannotationParameters struct {
+	Confidence          float64           `json:"confidence"`
+	NMSIoU              float64           `json:"nms"`
+	ClassMapping        map[string]string `json:"classMapping"`
+	BatchSize           int               `json:"batchSize"`
+	Device              string            `json:"device"`
+	LowConfidencePolicy string            `json:"lowConfidencePolicy"`
+	LowConfidenceFloor  float64           `json:"lowConfidenceFloor"`
+}
+
+func normalizePreannotationParameters(raw map[string]any) (preannotationParameters, error) {
+	value := preannotationParameters{
+		Confidence: 0.5, NMSIoU: 0.5, BatchSize: 8, Device: "GPU",
+		LowConfidencePolicy: "DROP", LowConfidenceFloor: 0.1, ClassMapping: map[string]string{},
+	}
+	encoded, _ := json.Marshal(raw)
+	if len(raw) > 0 && json.Unmarshal(encoded, &value) != nil {
+		return value, errors.New("预标注参数格式无效")
+	}
+	value.Device = strings.ToUpper(strings.TrimSpace(value.Device))
+	value.LowConfidencePolicy = strings.ToUpper(strings.TrimSpace(value.LowConfidencePolicy))
+	if value.Confidence < 0 || value.Confidence > 1 || value.NMSIoU <= 0 || value.NMSIoU > 1 ||
+		value.BatchSize < 1 || value.BatchSize > 128 ||
+		(value.Device != "GPU" && value.Device != "CPU") ||
+		(value.LowConfidencePolicy != "DROP" && value.LowConfidencePolicy != "KEEP_REVIEW") ||
+		value.LowConfidenceFloor < 0 || value.LowConfidenceFloor > value.Confidence {
+		return value, errors.New("置信度、NMS、批大小、设备或低置信保留策略无效")
+	}
+	return value, nil
+}
+
 // PreannotationCreate godoc
 // @Summary Create an idempotent pre-annotation run
 // @Tags VisionAI Annotation
@@ -594,26 +629,58 @@ func (h *Handler) PreannotationCreate(c *gin.Context) {
 		httpx.Fail(c, 409, 409, "仅允许选择已批准用于预标注的模型版本")
 		return
 	}
+	parameters, parameterErr := normalizePreannotationParameters(req.Parameters)
+	if parameterErr != nil {
+		httpx.Fail(c, 400, 400, parameterErr.Error())
+		return
+	}
 	key := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	if key == "" {
 		key = uuid.NewString()
 	}
 	run := PreannotationRun{
 		TenantID: project.TenantID, ProjectID: project.ID, AnnotationTaskID: task.ID,
-		ModelVersionID: req.ModelVersionID, Status: "QUEUED", Parameters: jsonValue(req.Parameters), IdempotencyKey: key,
+		ModelVersionID: req.ModelVersionID, Status: "QUEUED", Parameters: jsonValue(parameters),
+		IdempotencyKey: key, Breakdown: "{}", Provider: "ORCHESTRATOR",
 	}
-	if err := h.db.Create(&run).Error; err != nil {
+	job := PlatformJob{
+		TenantID: project.TenantID, ProjectID: project.ID, JobType: "PREANNOTATION",
+		ResourceType: "PREANNOTATION_RUN", Status: JobQueued, Stage: "QUEUED",
+		TraceID: c.GetString("trace_id"), Idempotency: "preannotation:" + key,
+		MaxRetries: 5, CreatedBy: c.GetUint64("user_id"),
+	}
+	if job.TraceID == "" {
+		job.TraceID = uuid.NewString()
+	}
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&run).Error; err != nil {
+			return err
+		}
+		job.ResourceID = run.ID
+		if err := tx.Create(&job).Error; err != nil {
+			return err
+		}
+		task.PreannotationRunID, task.Status = run.ID, AnnotationPreannotating
+		if err := tx.Save(&task).Error; err != nil {
+			return err
+		}
+		return tx.Create(&OutboxEvent{
+			TenantID: project.TenantID, EventID: uuid.NewString(), EventType: "preannotation.run.requested.v1",
+			AggregateType: "PREANNOTATION_RUN", AggregateID: run.ID,
+			Payload: jsonValue(gin.H{"preannotationRunId": run.ID}), Status: outboxNew,
+		}).Error
+	})
+	if err != nil {
 		var existing PreannotationRun
-		if h.db.Where("idempotency_key = ?", key).First(&existing).Error == nil {
+		if h.db.Where("tenant_id = ? AND idempotency_key = ?", project.TenantID, key).First(&existing).Error == nil {
 			httpx.OK(c, gin.H{"run": existing, "idempotentReplay": true})
 			return
 		}
 		httpx.Fail(c, 409, 409, "预标注任务创建失败")
 		return
 	}
-	task.PreannotationRunID, task.Status = run.ID, AnnotationPreannotating
-	h.db.Save(&task)
-	httpx.OK(c, gin.H{"run": run, "task": task})
+	_ = appendAudit(h.db, c, project.ID, "PREANNOTATION_RUN_REQUESTED", "PREANNOTATION_RUN", run.ID, nil, gin.H{"modelVersionId": run.ModelVersionID, "parameters": parameters})
+	httpx.OK(c, gin.H{"run": run, "task": task, "job": job})
 }
 
 type preannotationMetricsRequest struct {
@@ -646,12 +713,17 @@ func (h *Handler) PreannotationMetricsUpdate(c *gin.Context) {
 		return
 	}
 	var req preannotationMetricsRequest
-	if c.ShouldBindJSON(&req) != nil || req.ProposedCount < 0 || req.AcceptedCount < 0 || req.DeletedCount < 0 || req.ModifiedCount < 0 || req.AddedCount < 0 {
+	if c.ShouldBindJSON(&req) != nil || req.ProposedCount < 0 || req.AcceptedCount < 0 || req.DeletedCount < 0 || req.ModifiedCount < 0 || req.AddedCount < 0 ||
+		req.AcceptedCount+req.DeletedCount+req.ModifiedCount > req.ProposedCount || req.CorrectionSeconds < 0 {
 		httpx.Fail(c, 400, 400, "效率指标无效")
 		return
 	}
+	now := time.Now()
 	run.ProposedCount, run.AcceptedCount, run.DeletedCount = req.ProposedCount, req.AcceptedCount, req.DeletedCount
-	run.ModifiedCount, run.AddedCount, run.CorrectionSeconds, run.Status = req.ModifiedCount, req.AddedCount, req.CorrectionSeconds, "SUCCEEDED"
+	run.ModifiedCount, run.AddedCount, run.CorrectionSeconds, run.MetricsUpdatedAt = req.ModifiedCount, req.AddedCount, req.CorrectionSeconds, &now
+	if run.Status == "IMPORTED" {
+		run.Status = "SUCCEEDED"
+	}
 	h.db.Save(&run)
 	if task.Status == AnnotationPreannotating {
 		task.Status = AnnotationReady
@@ -664,8 +736,48 @@ func (h *Handler) PreannotationMetricsUpdate(c *gin.Context) {
 		}
 		return float64(value) / denominator
 	}
+	unitSeconds := 0.0
+	if total := run.AcceptedCount + run.ModifiedCount + run.AddedCount; total > 0 {
+		unitSeconds = float64(run.CorrectionSeconds) / float64(total)
+	}
 	httpx.OK(c, gin.H{"run": run, "rates": gin.H{
 		"accepted": rate(run.AcceptedCount), "deleted": rate(run.DeletedCount),
-		"modified": rate(run.ModifiedCount), "added": rate(run.AddedCount),
+		"modified": rate(run.ModifiedCount), "added": rate(run.AddedCount), "unitCorrectionSeconds": unitSeconds,
 	}})
+}
+
+// PreannotationCompare godoc
+// @Summary Compare pre-annotation model efficiency by task, category and scene
+// @Tags VisionAI Annotation
+// @Security BearerAuth
+// @Router /ai-platform/projects/{id}/preannotations/compare [get]
+func (h *Handler) PreannotationCompare(c *gin.Context) {
+	project, ok := h.projectAccess(c, false)
+	if !ok {
+		return
+	}
+	var rows []PreannotationRun
+	h.db.Where("tenant_id = ? AND project_id = ?", project.TenantID, project.ID).Order("id DESC").Limit(500).Find(&rows)
+	result := make([]gin.H, 0, len(rows))
+	for _, row := range rows {
+		denominator := float64(row.ProposedCount)
+		rate := func(value int64) float64 {
+			if denominator == 0 {
+				return 0
+			}
+			return float64(value) / denominator
+		}
+		unitSeconds := 0.0
+		if total := row.AcceptedCount + row.ModifiedCount + row.AddedCount; total > 0 {
+			unitSeconds = float64(row.CorrectionSeconds) / float64(total)
+		}
+		var breakdown map[string]any
+		_ = json.Unmarshal([]byte(row.Breakdown), &breakdown)
+		result = append(result, gin.H{
+			"run": row, "acceptanceRate": rate(row.AcceptedCount), "deletionRate": rate(row.DeletedCount),
+			"modificationRate": rate(row.ModifiedCount), "additionRate": rate(row.AddedCount),
+			"unitCorrectionSeconds": unitSeconds, "breakdown": breakdown,
+		})
+	}
+	httpx.OK(c, result)
 }

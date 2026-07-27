@@ -164,6 +164,12 @@ func processEvaluationEvent(ctx context.Context, db *gorm.DB, cfg config.Config,
 			}
 		}
 		row, matchedIoU := scoreEvaluationSample(run, item, sliceByAsset[item.AssetID], groundTruth, predictions, &accumulator)
+		row.CategoryLabels = evaluationCategoryLabels(groundTruth)
+		row.TargetSize = evaluationTargetSize(item.Boxes, asset.Width, asset.Height)
+		row.Scene = assetScene(asset)
+		row.Device = firstNonEmpty(asset.SourceDevice, evaluationMetadataString(asset, "sourceDevice"), "未知设备")
+		capturedAt := evaluationCaptureTime(asset)
+		row.CapturedAt = &capturedAt
 		row.LatencyMS = prediction.LatencyMS
 		accumulator.LatencyTotal += prediction.LatencyMS
 		if matchedIoU > 0 {
@@ -193,6 +199,60 @@ func processEvaluationEvent(ctx context.Context, db *gorm.DB, cfg config.Config,
 	now = *run.FinishedAt
 	return db.Model(&PlatformJob{}).Where("resource_type = ? AND resource_id = ?", "EVALUATION_RUN", run.ID).
 		Updates(map[string]any{"status": JobSucceeded, "stage": "SUCCEEDED", "progress": 100, "finished_at": now}).Error
+}
+
+func evaluationCategoryLabels(values []evaluatedDetection) string {
+	seen := map[string]bool{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		label := firstNonEmpty(value.LabelName, value.LabelCode, fmt.Sprintf("class-%d", value.ClassIndex))
+		if !seen[label] {
+			seen[label] = true
+			result = append(result, label)
+		}
+	}
+	sort.Strings(result)
+	return jsonValue(result)
+}
+
+func evaluationTargetSize(boxes []detectionTrainingBox, width, height int) string {
+	if len(boxes) == 0 || width <= 0 || height <= 0 {
+		return "none"
+	}
+	total := 0.0
+	for _, box := range boxes {
+		if len(box.XYXY) == 4 {
+			total += math.Max(0, box.XYXY[2]-box.XYXY[0]) * math.Max(0, box.XYXY[3]-box.XYXY[1])
+		}
+	}
+	ratio := total / math.Max(1, float64(len(boxes)*width*height))
+	if ratio < 0.02 {
+		return "small"
+	}
+	if ratio < 0.15 {
+		return "medium"
+	}
+	return "large"
+}
+
+func evaluationMetadataString(asset Asset, key string) string {
+	var metadata map[string]any
+	if json.Unmarshal([]byte(asset.Metadata), &metadata) == nil {
+		return strings.TrimSpace(fmt.Sprint(metadata[key]))
+	}
+	return ""
+}
+
+func evaluationCaptureTime(asset Asset) time.Time {
+	var metadata map[string]any
+	if json.Unmarshal([]byte(asset.Metadata), &metadata) == nil {
+		for _, key := range []string{"capturedAt", "captureTime", "createdAt"} {
+			if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(fmt.Sprint(metadata[key]))); err == nil {
+				return parsed
+			}
+		}
+	}
+	return asset.CreatedAt
 }
 
 func loadEvaluationIndex(ctx context.Context, objectStore storage.Provider, bucket string, artifact TrainingArtifact) (detectionTrainingIndex, error) {
@@ -519,14 +579,16 @@ func persistEvaluation(
 		if err := tx.CreateInBatches(rows, 100).Error; err != nil {
 			return err
 		}
-		for _, saved := range []struct {
+		savedSlices := []struct {
 			name, filter string
 			count        int
 		}{
 			{"False Positives", `{"errorType":"FP"}`, fpSamples},
 			{"False Negatives", `{"errorType":"FN"}`, fnSamples},
 			{"Low Confidence", `{"confidenceLt":0.5}`, lowConfidence},
-		} {
+		}
+		savedSlices = append(savedSlices, buildDimensionSavedSlices(rows)...)
+		for _, saved := range savedSlices {
 			if err := tx.Create(&EvaluationSavedSlice{
 				TenantID: run.TenantID, ProjectID: run.ProjectID, EvaluationRunID: run.ID,
 				Name: saved.name, Filter: saved.filter, SampleCount: saved.count, CreatedBy: run.CreatedBy,
@@ -539,6 +601,66 @@ func persistEvaluation(
 		run.Summary, run.FiftyOneDataset, run.FinishedAt = jsonValue(metrics), datasetName, &now
 		return tx.Save(run).Error
 	})
+}
+
+func buildDimensionSavedSlices(rows []EvaluationSample) []struct {
+	name, filter string
+	count        int
+} {
+	counts := map[string]int{}
+	filters := map[string]string{}
+	add := func(key, name, filter string) {
+		counts[key]++
+		filters[key] = jsonValue(map[string]any{"name": name, "filter": json.RawMessage(filter)})
+	}
+	for _, row := range rows {
+		var categories []string
+		_ = json.Unmarshal([]byte(row.CategoryLabels), &categories)
+		for _, category := range categories {
+			add("category:"+category, "类别 · "+category, jsonValue(map[string]any{"category": category}))
+		}
+		if row.TargetSize != "" && row.TargetSize != "none" {
+			add("size:"+row.TargetSize, "目标尺寸 · "+row.TargetSize, jsonValue(map[string]any{"targetSize": row.TargetSize}))
+		}
+		if row.Scene != "" {
+			add("scene:"+row.Scene, "场景 · "+row.Scene, jsonValue(map[string]any{"scene": row.Scene}))
+		}
+		if row.Device != "" {
+			add("device:"+row.Device, "设备 · "+row.Device, jsonValue(map[string]any{"device": row.Device}))
+		}
+		if row.CapturedAt != nil {
+			bucket := row.CapturedAt.Format("2006-01")
+			add("time:"+bucket, "时间 · "+bucket, jsonValue(map[string]any{"capturedMonth": bucket}))
+		}
+		confidenceBucket := "low"
+		if row.Confidence >= 0.8 {
+			confidenceBucket = "high"
+		} else if row.Confidence >= 0.5 {
+			confidenceBucket = "medium"
+		}
+		add("confidence:"+confidenceBucket, "置信度 · "+confidenceBucket, jsonValue(map[string]any{"confidenceBucket": confidenceBucket}))
+	}
+	result := make([]struct {
+		name, filter string
+		count        int
+	}, 0, len(counts))
+	keys := make([]string, 0, len(counts))
+	for key := range counts {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		var wrapped struct {
+			Name   string          `json:"name"`
+			Filter json.RawMessage `json:"filter"`
+		}
+		_ = json.Unmarshal([]byte(filters[key]), &wrapped)
+		result = append(result, struct {
+			name, filter string
+			count        int
+		}{wrapped.Name, string(wrapped.Filter), counts[key]})
+	}
+	return result
 }
 
 func normalizeEvaluationBox(box []float64, width, height int) []float64 {

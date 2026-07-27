@@ -11,6 +11,8 @@ type FeedbackPolicy struct {
 	ConfidenceBelow float64   `json:"confidenceBelow"`
 	CaptureEmpty    bool      `json:"captureEmpty"`
 	CaptureErrors   bool      `json:"captureErrors"`
+	CaptureManual   bool      `gorm:"not null;default:true" json:"captureManual"`
+	CaptureDrift    bool      `gorm:"not null;default:true" json:"captureDrift"`
 	DailyLimit      int       `gorm:"not null" json:"dailyLimit"`
 	RetentionDays   int       `gorm:"not null" json:"retentionDays"`
 	RedactionPolicy string    `gorm:"type:json;not null" json:"redactionPolicy"`
@@ -39,6 +41,31 @@ type FeedbackSample struct {
 	CreatedAt            time.Time  `json:"createTime"`
 }
 
+type FeedbackBenefitEvaluation struct {
+	ID                       uint64    `gorm:"primaryKey" json:"id"`
+	TenantID                 uint64    `gorm:"index;not null" json:"tenantId"`
+	ProjectID                uint64    `gorm:"index;not null" json:"projectId"`
+	FeedbackBatchID          uint64    `gorm:"uniqueIndex;not null" json:"feedbackBatchId"`
+	BaselineModelVersionID   uint64    `gorm:"index;not null" json:"baselineModelVersionId"`
+	CandidateModelVersionID  uint64    `gorm:"index;not null" json:"candidateModelVersionId"`
+	BaselineEvaluationRunID  uint64    `gorm:"index;not null" json:"baselineEvaluationRunId"`
+	CandidateEvaluationRunID uint64    `gorm:"index;not null" json:"candidateEvaluationRunId"`
+	BaselineDeploymentID     uint64    `gorm:"index" json:"baselineDeploymentId"`
+	CandidateDeploymentID    uint64    `gorm:"index" json:"candidateDeploymentId"`
+	Slices                   string    `gorm:"type:json;not null" json:"slices"`
+	BaselineQuality          string    `gorm:"type:json;not null" json:"baselineQuality"`
+	CandidateQuality         string    `gorm:"type:json;not null" json:"candidateQuality"`
+	BaselineProduction       string    `gorm:"type:json;not null" json:"baselineProduction"`
+	CandidateProduction      string    `gorm:"type:json;not null" json:"candidateProduction"`
+	Deltas                   string    `gorm:"type:json;not null" json:"deltas"`
+	Conclusion               string    `gorm:"size:32;index;not null" json:"conclusion"`
+	EvidenceSnapshot         string    `gorm:"type:longtext;not null" json:"evidenceSnapshot"`
+	EvidenceSHA256           string    `gorm:"size:64;not null" json:"evidenceSha256"`
+	CreatedBy                uint64    `gorm:"index;not null" json:"createdBy"`
+	CreatedAt                time.Time `json:"createTime"`
+	UpdatedAt                time.Time `json:"updateTime"`
+}
+
 type FeedbackBatch struct {
 	ID                   uint64     `gorm:"primaryKey" json:"id"`
 	TenantID             uint64     `gorm:"index;not null" json:"tenantId"`
@@ -53,6 +80,8 @@ type FeedbackBatch struct {
 	CreatedBy            uint64     `gorm:"index;not null" json:"createdBy"`
 	ReviewedBy           uint64     `gorm:"index" json:"reviewedBy"`
 	ReviewedAt           *time.Time `json:"reviewedAt"`
+	PrivacyReviewedBy    uint64     `gorm:"index" json:"privacyReviewedBy"`
+	PrivacyReviewedAt    *time.Time `json:"privacyReviewedAt"`
 	CreatedAt            time.Time  `json:"createTime"`
 	UpdatedAt            time.Time  `json:"updateTime"`
 }
@@ -60,3 +89,6 @@ type FeedbackBatch struct {
 func (FeedbackPolicy) TableName() string { return "ai_feedback_policy" }
 func (FeedbackSample) TableName() string { return "ai_feedback_sample" }
 func (FeedbackBatch) TableName() string  { return "ai_feedback_batch" }
+func (FeedbackBenefitEvaluation) TableName() string {
+	return "ai_feedback_benefit_evaluation"
+}

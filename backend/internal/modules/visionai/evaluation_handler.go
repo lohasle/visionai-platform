@@ -1,9 +1,12 @@
 package visionai
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -17,11 +20,24 @@ type evaluationSuiteRequest struct {
 	Slices           []string           `json:"slices"`
 	Thresholds       map[string]float64 `json:"thresholds"`
 	GatePolicy       string             `json:"gatePolicy"`
+	AutoTrigger      bool               `json:"autoTrigger"`
 }
 
 type evaluationRunRequest struct {
 	TrainingRunID uint64 `json:"trainingRunId"`
 	BaselineRunID uint64 `json:"baselineRunId"`
+}
+
+type evaluationSavedSliceRequest struct {
+	Name          string   `json:"name"`
+	Category      string   `json:"category"`
+	TargetSize    string   `json:"targetSize"`
+	Scene         string   `json:"scene"`
+	Device        string   `json:"device"`
+	TimeFrom      string   `json:"timeFrom"`
+	TimeTo        string   `json:"timeTo"`
+	ConfidenceMin *float64 `json:"confidenceMin"`
+	ConfidenceMax *float64 `json:"confidenceMax"`
 }
 
 func (h *Handler) EvaluationSuitePage(c *gin.Context) {
@@ -50,7 +66,7 @@ func (h *Handler) EvaluationSuiteCreate(c *gin.Context) {
 		return
 	}
 	if len(req.Slices) == 0 {
-		req.Slices = []string{"all", "small-object", "occluded", "dense", "night", "low-confidence"}
+		req.Slices = []string{"all", "category", "target-size", "scene", "device", "time", "confidence"}
 	}
 	if len(req.Thresholds) == 0 {
 		req.Thresholds = map[string]float64{"mAP": 0.5, "precision": 0.5, "recall": 0.5}
@@ -62,7 +78,8 @@ func (h *Handler) EvaluationSuiteCreate(c *gin.Context) {
 	row := EvaluationSuite{
 		TenantID: project.TenantID, ProjectID: project.ID, Name: strings.TrimSpace(req.Name),
 		DatasetVersionID: dataset.ID, Slices: jsonValue(req.Slices), Thresholds: jsonValue(req.Thresholds),
-		GatePolicy: policy, EvaluatorVersion: "visionai-evaluator/1.0.0", CreatedBy: c.GetUint64("user_id"),
+		GatePolicy: policy, AutoTrigger: req.AutoTrigger,
+		EvaluatorVersion: "visionai-evaluator/1.0.0", CreatedBy: c.GetUint64("user_id"),
 	}
 	if h.db.Create(&row).Error != nil {
 		httpx.Fail(c, 500, 500, "评估套件创建失败")
@@ -165,9 +182,164 @@ func (h *Handler) EvaluationRunGet(c *gin.Context) {
 	if errorType := strings.TrimSpace(c.Query("errorType")); errorType != "" {
 		query = query.Where("error_type = ?", strings.ToUpper(errorType))
 	}
+	var activeSlice EvaluationSavedSlice
+	if sliceID, _ := strconv.ParseUint(c.Query("savedSliceId"), 10, 64); sliceID > 0 {
+		if h.db.Where("tenant_id = ? AND evaluation_run_id = ? AND id = ?", project.TenantID, run.ID, sliceID).First(&activeSlice).Error != nil {
+			httpx.Fail(c, 404, 404, "保存切片不存在")
+			return
+		}
+		var filter map[string]any
+		if json.Unmarshal([]byte(activeSlice.Filter), &filter) != nil {
+			httpx.Fail(c, 500, 500, "保存切片条件损坏")
+			return
+		}
+		query = applyEvaluationSliceFilter(query, filter)
+	}
 	query.Order("io_u, confidence").Limit(500).Find(&samples)
 	h.db.Where("tenant_id = ? AND evaluation_run_id = ?", project.TenantID, run.ID).Order("id").Find(&slices)
-	httpx.OK(c, gin.H{"run": run, "metrics": metrics, "samples": samples, "savedSlices": slices})
+	httpx.OK(c, gin.H{"run": run, "metrics": metrics, "samples": samples, "savedSlices": slices, "activeSlice": activeSlice})
+}
+
+func applyEvaluationSliceFilter(query *gorm.DB, filter map[string]any) *gorm.DB {
+	if value := strings.TrimSpace(fmt.Sprint(filter["errorType"])); value != "" && value != "<nil>" {
+		query = query.Where("error_type = ?", strings.ToUpper(value))
+	}
+	if value := strings.TrimSpace(fmt.Sprint(filter["category"])); value != "" && value != "<nil>" {
+		encoded, _ := json.Marshal(value)
+		query = query.Where("JSON_CONTAINS(category_labels, ?)", string(encoded))
+	}
+	for key, column := range map[string]string{"targetSize": "target_size", "scene": "scene", "device": "device"} {
+		if value := strings.TrimSpace(fmt.Sprint(filter[key])); value != "" && value != "<nil>" {
+			query = query.Where(column+" = ?", value)
+		}
+	}
+	if value := strings.TrimSpace(fmt.Sprint(filter["capturedMonth"])); value != "" && value != "<nil>" {
+		if from, err := time.Parse("2006-01", value); err == nil {
+			query = query.Where("captured_at >= ? AND captured_at < ?", from, from.AddDate(0, 1, 0))
+		}
+	}
+	for key, operator := range map[string]string{
+		"confidenceLt": "<", "confidenceMin": ">=", "confidenceMax": "<=",
+	} {
+		if value, exists := filter[key]; exists {
+			query = query.Where("confidence "+operator+" ?", numberFromAny(value))
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(fmt.Sprint(filter["confidenceBucket"]))) {
+	case "low":
+		query = query.Where("confidence < ?", 0.5)
+	case "medium":
+		query = query.Where("confidence >= ? AND confidence < ?", 0.5, 0.8)
+	case "high":
+		query = query.Where("confidence >= ?", 0.8)
+	}
+	if value, exists := filter["timeFrom"]; exists {
+		query = query.Where("captured_at >= ?", value)
+	}
+	if value, exists := filter["timeTo"]; exists {
+		query = query.Where("captured_at <= ?", value)
+	}
+	return query
+}
+
+// EvaluationSavedSliceCreate godoc
+// @Summary Save a governed evaluation slice by category, size, scene, device, time and confidence
+// @Tags VisionAI Evaluation
+// @Security BearerAuth
+// @Router /ai-platform/projects/{id}/evaluation-runs/{runId}/slices [post]
+func (h *Handler) EvaluationSavedSliceCreate(c *gin.Context) {
+	project, ok := h.projectAccess(c, true)
+	if !ok || !h.requireProjectRole(c, project, "ALGORITHM_ENGINEER", "REVIEWER", "PROJECT_OWNER") {
+		return
+	}
+	runID, _ := strconv.ParseUint(c.Param("runId"), 10, 64)
+	var run EvaluationRun
+	if h.db.Where("tenant_id = ? AND project_id = ? AND id = ? AND status = ?", project.TenantID, project.ID, runID, "SUCCEEDED").First(&run).Error != nil {
+		httpx.Fail(c, 409, 409, "仅成功评估运行可保存切片")
+		return
+	}
+	var req evaluationSavedSliceRequest
+	if c.ShouldBindJSON(&req) != nil || strings.TrimSpace(req.Name) == "" || len(strings.TrimSpace(req.Name)) > 160 {
+		httpx.Fail(c, 400, 400, "切片名称无效")
+		return
+	}
+	query := h.db.Model(&EvaluationSample{}).Where("tenant_id = ? AND evaluation_run_id = ?", project.TenantID, run.ID)
+	filter := map[string]any{}
+	if value := strings.TrimSpace(req.Category); value != "" {
+		encoded, _ := json.Marshal(value)
+		query = query.Where("JSON_CONTAINS(category_labels, ?)", string(encoded))
+		filter["category"] = value
+	}
+	if value := strings.ToLower(strings.TrimSpace(req.TargetSize)); value != "" {
+		if value != "small" && value != "medium" && value != "large" {
+			httpx.Fail(c, 400, 400, "目标尺寸必须是 small、medium 或 large")
+			return
+		}
+		query = query.Where("target_size = ?", value)
+		filter["targetSize"] = value
+	}
+	if value := strings.TrimSpace(req.Scene); value != "" {
+		query = query.Where("scene = ?", value)
+		filter["scene"] = value
+	}
+	if value := strings.TrimSpace(req.Device); value != "" {
+		query = query.Where("device = ?", value)
+		filter["device"] = value
+	}
+	if value := strings.TrimSpace(req.TimeFrom); value != "" {
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			httpx.Fail(c, 400, 400, "timeFrom 必须是 RFC3339")
+			return
+		}
+		query = query.Where("captured_at >= ?", parsed)
+		filter["timeFrom"] = parsed
+	}
+	if value := strings.TrimSpace(req.TimeTo); value != "" {
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			httpx.Fail(c, 400, 400, "timeTo 必须是 RFC3339")
+			return
+		}
+		query = query.Where("captured_at <= ?", parsed)
+		filter["timeTo"] = parsed
+	}
+	if req.ConfidenceMin != nil {
+		if *req.ConfidenceMin < 0 || *req.ConfidenceMin > 1 {
+			httpx.Fail(c, 400, 400, "最低置信度无效")
+			return
+		}
+		query = query.Where("confidence >= ?", *req.ConfidenceMin)
+		filter["confidenceMin"] = *req.ConfidenceMin
+	}
+	if req.ConfidenceMax != nil {
+		if *req.ConfidenceMax < 0 || *req.ConfidenceMax > 1 {
+			httpx.Fail(c, 400, 400, "最高置信度无效")
+			return
+		}
+		query = query.Where("confidence <= ?", *req.ConfidenceMax)
+		filter["confidenceMax"] = *req.ConfidenceMax
+	}
+	if len(filter) == 0 {
+		httpx.Fail(c, 400, 400, "至少设置一个切片条件")
+		return
+	}
+	var count int64
+	if query.Count(&count).Error != nil {
+		httpx.Fail(c, 500, 500, "切片样本统计失败")
+		return
+	}
+	row := EvaluationSavedSlice{
+		TenantID: project.TenantID, ProjectID: project.ID, EvaluationRunID: run.ID,
+		Name: strings.TrimSpace(req.Name), Filter: jsonValue(filter), SampleCount: int(count),
+		CreatedBy: c.GetUint64("user_id"),
+	}
+	if h.db.Create(&row).Error != nil {
+		httpx.Fail(c, 500, 500, "保存切片失败")
+		return
+	}
+	_ = appendAudit(h.db, c, project.ID, "EVALUATION_SLICE_SAVED", "EVALUATION_SAVED_SLICE", row.ID, nil, row)
+	httpx.OK(c, row)
 }
 
 func (h *Handler) EvaluationWorkbench(c *gin.Context) {

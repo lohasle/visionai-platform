@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type LocalDockerSpec struct {
@@ -116,6 +117,12 @@ func (p LocalDocker) Run(ctx context.Context, spec LocalDockerSpec) (ResultManif
 		args = append(args, strings.Fields(entrypoint)...)
 	}
 	command := exec.CommandContext(ctx, binary, args...)
+	containerName := "visionai-training-" + strconv.FormatUint(spec.RunID, 10)
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = exec.CommandContext(cleanupCtx, binary, "rm", "-f", containerName).Run()
+	}()
 	log, runErr := command.CombinedOutput()
 	if runErr != nil {
 		return ResultManifest{}, log, fmt.Errorf("LocalDocker training failed: %w", runErr)

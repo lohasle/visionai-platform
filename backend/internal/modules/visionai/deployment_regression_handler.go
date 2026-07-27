@@ -206,7 +206,7 @@ func (h *Handler) DeploymentPredictImage(c *gin.Context) {
 		}
 		h.db.Create(&trace)
 		evaluateAlertRules(h.db, trace)
-		captureFeedback(h.db, trace)
+		captureFeedback(h, trace)
 		_ = appendAudit(h.db, c, project.ID, "INFERENCE_IMAGE_TEST_FAILED", "INFERENCE_TRACE", trace.ID, nil, gin.H{"traceId": traceID, "sourceSha256": sourceHash})
 		httpx.Fail(c, http.StatusBadGateway, 502, "推理服务失败："+predictErr.Error())
 		return
@@ -226,7 +226,7 @@ func (h *Handler) DeploymentPredictImage(c *gin.Context) {
 		return
 	}
 	evaluateAlertRules(h.db, trace)
-	captureFeedback(h.db, trace)
+	captureFeedback(h, trace)
 	_ = appendAudit(h.db, c, project.ID, "INFERENCE_IMAGE_TESTED", "INFERENCE_TRACE", trace.ID, nil, gin.H{
 		"traceId": traceID, "sourceSha256": sourceHash, "regressionStatus": regression.Status,
 	})

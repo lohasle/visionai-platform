@@ -39,6 +39,8 @@ func ProcessDomainEvent(ctx context.Context, db *gorm.DB, cfg config.Config, eve
 	switch event.EventType {
 	case "annotation.task.prepare.v1", "annotation.export.requested.v1":
 		return processAnnotationEvent(ctx, db, cfg, event)
+	case "preannotation.run.requested.v1":
+		return processPreannotationEvent(ctx, db, cfg, event)
 	case "dataset.validate.requested.v1", "dataset.freeze.requested.v1":
 		return processDatasetEvent(ctx, db, cfg, event)
 	case "training.run.requested.v1", "training.template.smoke.requested.v1":
@@ -328,34 +330,54 @@ func (h *Handler) importDestination(run AssetImportRun, filename string) string 
 }
 
 func (h *Handler) registerImportedObject(ctx context.Context, run AssetImportRun, policy, destination, filename string) error {
-	hash, contentType, width, height, size, err := inspectImage(ctx, h, destination)
+	inspection, err := inspectStoredAsset(ctx, h, destination, filename, "")
 	thumbnailKey := destination + ".thumbnail.jpg"
-	if err == nil {
+	if err == nil && inspection.MediaKind == "IMAGE" {
 		err = generateThumbnail(ctx, h, destination, thumbnailKey)
 	}
 	if err != nil {
+		errorCode := assetInspectionErrorCode(err)
+		metadata, _ := json.Marshal(inspection.Metadata)
 		invalid := Asset{
 			TenantID: run.TenantID, ProjectID: run.ProjectID, Filename: filename,
-			ObjectKey: destination, URI: h.storage.URI(destination), Size: size, Status: AssetInvalid,
-			ContentType: "application/octet-stream", Metadata: "{}", ErrorCode: "IMAGE_DECODE_FAILED",
+			ObjectKey: destination, URI: h.storage.URI(destination), SHA256: inspection.Hash,
+			Size: inspection.Size, MediaKind: inspection.MediaKind, Status: AssetInvalid,
+			ContentType: firstNonEmpty(inspection.ContentType, "application/octet-stream"),
+			Metadata:    string(metadata), ErrorCode: errorCode,
 			ErrorMessage: err.Error(), CreatedBy: run.CreatedBy,
 		}
 		_ = h.db.Create(&invalid).Error
 		return err
 	}
 	var duplicate Asset
-	hasDuplicate := h.db.Where("tenant_id = ? AND project_id = ? AND sha256 = ? AND status = ?", run.TenantID, run.ProjectID, hash, AssetReady).First(&duplicate).Error == nil
+	hasDuplicate := h.db.Where("tenant_id = ? AND project_id = ? AND sha256 = ? AND status = ?", run.TenantID, run.ProjectID, inspection.Hash, AssetReady).First(&duplicate).Error == nil
 	if hasDuplicate && policy == "SKIP" {
 		_ = h.storage.Delete(ctx, destination)
 		_ = h.storage.Delete(ctx, thumbnailKey)
 		return nil
 	}
-	metadata, _ := json.Marshal(map[string]any{"importRunId": run.ID, "actualContentType": contentType})
+	var source importSourceConfig
+	_ = json.Unmarshal([]byte(run.SourceConfig), &source)
+	for _, key := range []string{"language", "sourceDevice", "businessScene"} {
+		if value := strings.TrimSpace(fmt.Sprint(source.Options[key])); value != "" && value != "<nil>" {
+			inspection.Metadata[key] = value
+		}
+	}
+	inspection.Metadata["importRunId"] = run.ID
+	inspection.Metadata["actualContentType"] = inspection.ContentType
+	metadata, _ := json.Marshal(inspection.Metadata)
 	asset := Asset{
 		TenantID: run.TenantID, ProjectID: run.ProjectID, Filename: filename,
-		ObjectKey: destination, URI: h.storage.URI(destination), SHA256: hash, ContentType: contentType,
-		ThumbnailObjectKey: thumbnailKey, ThumbnailURI: h.storage.URI(thumbnailKey),
-		Size: size, Width: width, Height: height, Status: AssetReady, Metadata: string(metadata), CreatedBy: run.CreatedBy,
+		ObjectKey: destination, URI: h.storage.URI(destination), SHA256: inspection.Hash, ContentType: inspection.ContentType,
+		Size: inspection.Size, Width: inspection.Width, Height: inspection.Height, MediaKind: inspection.MediaKind,
+		DurationSeconds: inspection.DurationSeconds, Codec: inspection.Codec,
+		Language:      firstNonEmpty(inspection.Language, strings.TrimSpace(fmt.Sprint(source.Options["language"]))),
+		SourceDevice:  firstNonEmpty(inspection.SourceDevice, strings.TrimSpace(fmt.Sprint(source.Options["sourceDevice"]))),
+		BusinessScene: strings.TrimSpace(fmt.Sprint(source.Options["businessScene"])),
+		Status:        AssetReady, Metadata: string(metadata), CreatedBy: run.CreatedBy,
+	}
+	if inspection.MediaKind == "IMAGE" {
+		asset.ThumbnailObjectKey, asset.ThumbnailURI = thumbnailKey, h.storage.URI(thumbnailKey)
 	}
 	if hasDuplicate && policy == "REFERENCE" {
 		_ = h.storage.Delete(ctx, destination)
@@ -364,4 +386,13 @@ func (h *Handler) registerImportedObject(ctx context.Context, run AssetImportRun
 		asset.ThumbnailObjectKey, asset.ThumbnailURI = duplicate.ThumbnailObjectKey, duplicate.ThumbnailURI
 	}
 	return h.db.Create(&asset).Error
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if normalized := strings.TrimSpace(value); normalized != "" && normalized != "<nil>" {
+			return normalized
+		}
+	}
+	return ""
 }

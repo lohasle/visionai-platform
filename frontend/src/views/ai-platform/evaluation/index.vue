@@ -15,7 +15,7 @@
         <el-option
           v-for="project in projects"
           :key="project.id"
-          :label="project.name"
+          :label="`${project.name} · ${project.code}`"
           :value="project.id"
         />
       </el-select>
@@ -50,7 +50,10 @@
         >
           <span>DatasetVersion #{{ suite.datasetVersionId }}</span
           ><strong>{{ suite.name }}</strong
-          ><small>{{ suite.gatePolicy }} · {{ suite.evaluatorVersion }}</small>
+          ><small
+            >{{ suite.gatePolicy }} · {{ suite.evaluatorVersion }} ·
+            {{ suite.autoTrigger ? '训练成功自动评估' : '手动触发' }}</small
+          >
         </button>
         <el-button v-if="selectedSuite" @click="runVisible = true">运行评估</el-button>
       </aside>
@@ -101,6 +104,13 @@
               label="人工审核"
               value="MANUAL_REVIEW" /></el-select
         ></el-form-item>
+        <el-form-item label="触发方式">
+          <el-switch
+            v-model="suiteForm.autoTrigger"
+            active-text="匹配数据集的训练成功后自动评估"
+            inactive-text="仅手动触发"
+          />
+        </el-form-item>
         <div class="form-grid"
           ><el-form-item label="mAP 下限"
             ><el-input-number
@@ -154,14 +164,18 @@
           ><el-button
             v-for="slice in detail.savedSlices"
             :key="slice.id"
-            @click="filterSamples(slice.name)"
+            @click="filterSamples(slice.id)"
             >{{ slice.name }} · {{ slice.sampleCount }}</el-button
+          ><el-button type="primary" plain @click="sliceVisible = true">保存切片</el-button
           ><el-button type="primary" plain @click="workbench">受控工作台</el-button></div
         >
         <el-table :data="detail.samples">
           <el-table-column prop="assetId" label="Asset" width="90" />
           <el-table-column prop="split" label="Split" width="85" />
           <el-table-column prop="slice" label="切片" />
+          <el-table-column prop="targetSize" label="目标尺寸" width="100" />
+          <el-table-column prop="scene" label="场景" min-width="120" />
+          <el-table-column prop="device" label="设备" min-width="120" />
           <el-table-column prop="errorType" label="错误" width="90"
             ><template #default="{ row }"
               ><el-tag :type="row.errorType === 'TP' ? 'success' : 'danger'">{{
@@ -175,6 +189,35 @@
         </el-table>
       </template>
     </el-drawer>
+    <el-dialog v-model="sliceVisible" title="保存评估切片" width="640">
+      <el-form label-position="top">
+        <el-form-item label="切片名称" required>
+          <el-input v-model="sliceForm.name" placeholder="例如 夜间 Camera-A 小目标" />
+        </el-form-item>
+        <div class="form-grid">
+          <el-form-item label="类别"><el-input v-model="sliceForm.category" /></el-form-item>
+          <el-form-item label="目标尺寸">
+            <el-select v-model="sliceForm.targetSize" clearable class="full">
+              <el-option label="小目标" value="small" />
+              <el-option label="中目标" value="medium" />
+              <el-option label="大目标" value="large" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="场景"><el-input v-model="sliceForm.scene" /></el-form-item>
+          <el-form-item label="设备"><el-input v-model="sliceForm.device" /></el-form-item>
+          <el-form-item label="最低置信度">
+            <el-input-number v-model="sliceForm.confidenceMin" :min="0" :max="1" :step="0.05" />
+          </el-form-item>
+          <el-form-item label="最高置信度">
+            <el-input-number v-model="sliceForm.confidenceMax" :min="0" :max="1" :step="0.05" />
+          </el-form-item>
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="sliceVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveSlice">保存并统计样本</el-button>
+      </template>
+    </el-dialog>
     <EmbeddedWorkbench
       v-model="workbenchVisible"
       provider="FiftyOne"
@@ -194,6 +237,7 @@ import { getDatasets, getDatasetVersions, type DatasetVersion } from '@/api/ai-p
 import { getTrainingRuns, type TrainingRun } from '@/api/ai-platform/training'
 import {
   createEvaluationRun,
+  createEvaluationSavedSlice,
   createEvaluationSuite,
   getEvaluationRun,
   getEvaluationRuns,
@@ -217,6 +261,7 @@ const detail = ref<Awaited<ReturnType<typeof getEvaluationRun>>>()
 const suiteVisible = ref(false)
 const runVisible = ref(false)
 const detailVisible = ref(false)
+const sliceVisible = ref(false)
 const workbenchVisible = ref(false)
 const workbenchUrl = ref('')
 const workbenchTitle = ref('FiftyOne 评估工作台')
@@ -226,10 +271,20 @@ const suiteForm = reactive({
   name: '',
   datasetVersionId: undefined as number | undefined,
   gatePolicy: 'MUST_PASS',
+  autoTrigger: true,
   map: 0.5,
   recall: 0.5
 })
 const runForm = reactive({ trainingRunId: undefined as number | undefined, baselineRunId: 0 })
+const sliceForm = reactive({
+  name: '',
+  category: '',
+  targetSize: '',
+  scene: '',
+  device: '',
+  confidenceMin: undefined as number | undefined,
+  confidenceMax: undefined as number | undefined
+})
 const passedCount = computed(() => runs.value.filter((run) => run.gateDecision === 'PASSED').length)
 const metricValue = (name: string) => detail.value?.metrics.find((m) => m.name === name)?.value || 0
 const fpCount = computed(() => metricValue('FP'))
@@ -271,7 +326,8 @@ const submitSuite = async () => {
     name: suiteForm.name,
     datasetVersionId: suiteForm.datasetVersionId,
     gatePolicy: suiteForm.gatePolicy,
-    slices: ['all', 'small-object', 'occluded', 'dense', 'night', 'low-confidence'],
+    autoTrigger: suiteForm.autoTrigger,
+    slices: ['all', 'category', 'target-size', 'scene', 'device', 'time', 'confidence'],
     thresholds: { mAP: suiteForm.map, precision: 0.5, recall: suiteForm.recall }
   })
   suiteVisible.value = false
@@ -291,10 +347,19 @@ const showRun = async (run: EvaluationRun) => {
   detail.value = await getEvaluationRun(projectId.value!, run.id)
   detailVisible.value = true
 }
-const filterSamples = async (name: string) => {
+const filterSamples = async (savedSliceId: number) => {
   if (!detail.value) return
-  const type = name.includes('Positive') ? 'FP' : name.includes('Negative') ? 'FN' : undefined
-  detail.value = await getEvaluationRun(projectId.value!, detail.value.run.id, type)
+  detail.value = await getEvaluationRun(projectId.value!, detail.value.run.id, { savedSliceId })
+}
+const saveSlice = async () => {
+  if (!projectId.value || !detail.value || !sliceForm.name.trim())
+    return message.warning('请填写切片名称')
+  const row = await createEvaluationSavedSlice(projectId.value, detail.value.run.id, {
+    ...sliceForm
+  })
+  sliceVisible.value = false
+  message.success(`切片已保存，命中 ${row.sampleCount} 个样本`)
+  detail.value = await getEvaluationRun(projectId.value, detail.value.run.id)
 }
 const workbench = async () => {
   if (!detail.value) return

@@ -11,11 +11,19 @@
           ref="fileInput"
           class="file-input"
           type="file"
-          accept="image/*"
+          accept="image/*,video/*,text/*,.json,.jsonl,.csv,.tsv,.xml,.yaml,.yml"
+          multiple
           @change="selectFile"
         />
         <el-button :disabled="!projectId" @click="fileInput?.click()">
-          <Icon icon="lucide:upload" :size="16" />上传图像
+          <Icon icon="lucide:upload" :size="16" />上传文件
+        </el-button>
+        <el-button
+          :loading="similarityLoading"
+          :disabled="!projectId || !total"
+          @click="analyzeSimilarity"
+        >
+          <Icon icon="lucide:scan-search" :size="16" />FiftyOne 近似去重
         </el-button>
         <el-button type="primary" :disabled="!projectId" @click="importVisible = true">
           <Icon icon="lucide:folder-input" :size="16" />批量导入
@@ -31,7 +39,7 @@
         <el-option
           v-for="project in projects"
           :key="project.id"
-          :label="project.name"
+          :label="`${project.name} · ${project.code}`"
           :value="project.id"
         />
       </el-select>
@@ -48,6 +56,18 @@
         <el-option label="无效" value="INVALID" />
         <el-option label="缺失" value="MISSING" />
         <el-option label="回收站" value="DELETED" />
+      </el-select>
+      <el-select v-model="query.mediaKind" clearable placeholder="全部文件类型">
+        <el-option label="图像" value="IMAGE" />
+        <el-option label="视频" value="VIDEO" />
+        <el-option label="文本/清单" value="TEXT" />
+      </el-select>
+      <el-select v-model="query.errorCode" clearable placeholder="全部质量结果">
+        <el-option label="媒体损坏/无法解码" value="MEDIA_DECODE_FAILED" />
+        <el-option label="文本无法解码" value="TEXT_DECODE_FAILED" />
+        <el-option label="空文本" value="EMPTY_TEXT" />
+        <el-option label="格式缺失" value="FORMAT_MISSING" />
+        <el-option label="敏感字段" value="SENSITIVE_FIELD" />
       </el-select>
       <el-select
         v-model="query.tagDefinitionIds"
@@ -81,7 +101,7 @@
         <small>项目资产</small><strong>{{ total }}</strong>
       </article>
       <article>
-        <small>可用图像</small><strong>{{ qualityCount('READY') }}</strong>
+        <small>可用媒体</small><strong>{{ qualityCount('READY') }}</strong>
       </article>
       <article>
         <small>需修复</small
@@ -89,6 +109,9 @@
       </article>
       <article>
         <small>重复哈希组</small><strong>{{ quality.duplicateGroups }}</strong>
+      </article>
+      <article>
+        <small>近似重复组</small><strong>{{ quality.nearDuplicateGroups }}</strong>
       </article>
     </section>
 
@@ -102,14 +125,35 @@
             @change="toggleAsset(asset.id)"
           />
           <img v-if="asset.thumbnailUrl" :src="asset.thumbnailUrl" :alt="asset.filename" />
-          <Icon v-else icon="lucide:image-off" :size="30" />
+          <Icon
+            v-else
+            :icon="
+              asset.mediaKind === 'VIDEO'
+                ? 'lucide:video'
+                : asset.mediaKind === 'TEXT'
+                  ? 'lucide:file-text'
+                  : 'lucide:image-off'
+            "
+            :size="30"
+          />
           <el-tag class="status" :type="asset.status === 'READY' ? 'success' : 'danger'">
             {{ asset.status }}
           </el-tag>
         </div>
         <div class="asset-info">
           <strong :title="asset.filename">{{ asset.filename }}</strong>
-          <span>{{ asset.width }}×{{ asset.height }} · {{ formatSize(asset.size) }}</span>
+          <span>
+            <template v-if="asset.mediaKind !== 'TEXT'"
+              >{{ asset.width }}×{{ asset.height }} ·
+            </template>
+            {{ formatSize(asset.size) }}
+            <template v-if="asset.mediaKind === 'VIDEO'">
+              · {{ asset.durationSeconds.toFixed(1) }}s · {{ asset.codec }}
+            </template>
+          </span>
+          <span v-if="asset.businessScene || asset.sourceDevice">
+            {{ asset.businessScene || '未分类场景' }} · {{ asset.sourceDevice || '未知设备' }}
+          </span>
           <code>{{ asset.sha256 ? asset.sha256.slice(0, 16) : asset.errorCode }}</code>
           <p v-if="asset.errorMessage">{{ asset.errorMessage }}</p>
           <div class="asset-tags">
@@ -125,16 +169,34 @@
           </div>
         </div>
         <footer>
-          <span v-if="asset.duplicateOfId">引用 #{{ asset.duplicateOfId }}</span>
+          <span v-if="asset.nearDuplicateOfId">近似组 #{{ asset.nearDuplicateOfId }}</span>
+          <span v-else-if="asset.duplicateOfId">引用 #{{ asset.duplicateOfId }}</span>
+          <span v-else-if="asset.status === 'DELETED' && asset.purgeEligibleAt">
+            保留至 {{ formatDateTime(asset.purgeEligibleAt) }}
+          </span>
           <span v-else>原始对象</span>
-          <el-button
-            v-if="asset.status !== 'DELETED'"
-            link
-            type="danger"
-            @click="removeAsset(asset)"
-          >
-            移入回收站
-          </el-button>
+          <div>
+            <el-button link @click="openAssetDetail(asset)">详情与引用</el-button>
+            <el-button
+              v-if="asset.status !== 'DELETED'"
+              link
+              type="danger"
+              @click="removeAsset(asset)"
+            >
+              移入回收站
+            </el-button>
+            <template v-else>
+              <el-button link type="primary" @click="doRestoreAsset(asset)">恢复</el-button>
+              <el-button
+                link
+                type="danger"
+                :disabled="!isPurgeEligible(asset)"
+                @click="doPurgeAsset(asset)"
+              >
+                永久清理
+              </el-button>
+            </template>
+          </div>
         </footer>
       </article>
       <div v-if="!loading && !assets.length" class="empty-state">
@@ -173,10 +235,54 @@
             <el-radio value="KEEP">保留副本</el-radio>
           </el-radio-group>
         </el-form-item>
+        <el-form-item label="业务场景">
+          <el-input v-model="importForm.businessScene" placeholder="例如 夜间道路" />
+        </el-form-item>
+        <el-form-item label="来源设备">
+          <el-input v-model="importForm.sourceDevice" placeholder="例如 Camera-A / iPhone" />
+        </el-form-item>
+        <el-form-item label="语言">
+          <el-input v-model="importForm.language" placeholder="例如 zh-CN" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="importVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="submitImport">创建任务</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="metadataVisible" title="媒体元数据" width="560">
+      <el-alert
+        :closable="false"
+        type="info"
+        show-icon
+        :title="
+          pendingFiles.length
+            ? pendingFiles.length === 1
+              ? `${pendingFiles[0].name} · ${formatSize(pendingFiles[0].size)}`
+              : `${pendingFiles.length} 个媒体文件 · 共 ${formatSize(pendingFiles.reduce((sum, file) => sum + file.size, 0))}`
+            : '选择媒体文件'
+        "
+      />
+      <el-form class="metadata-form" label-position="top">
+        <el-form-item label="业务场景">
+          <el-input v-model="uploadMetadata.businessScene" placeholder="例如 夜间道路、产线质检" />
+        </el-form-item>
+        <el-form-item label="来源设备">
+          <el-input
+            v-model="uploadMetadata.sourceDevice"
+            placeholder="可留空，由视频容器元数据自动补全"
+          />
+        </el-form-item>
+        <el-form-item label="语言">
+          <el-input v-model="uploadMetadata.language" placeholder="例如 zh-CN" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="cancelUpload">取消</el-button>
+        <el-button type="primary" :loading="uploading" @click="submitUpload">
+          分片上传并提取元数据
+        </el-button>
       </template>
     </el-dialog>
 
@@ -240,18 +346,92 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <el-drawer v-model="detailVisible" title="资产详情与引用" size="640">
+      <div v-if="assetDetail" class="asset-detail" v-loading="detailLoading">
+        <img
+          v-if="assetDetail.previewUrl && assetDetail.asset.mediaKind === 'IMAGE'"
+          class="detail-preview"
+          :src="assetDetail.previewUrl"
+          :alt="assetDetail.asset.filename"
+        />
+        <div class="detail-heading">
+          <div>
+            <small>Asset #{{ assetDetail.asset.id }}</small>
+            <h2>{{ assetDetail.asset.filename }}</h2>
+          </div>
+          <el-tag :type="assetDetail.asset.status === 'READY' ? 'success' : 'warning'">
+            {{ assetDetail.asset.status }}
+          </el-tag>
+        </div>
+        <dl class="detail-grid">
+          <div
+            ><dt>媒体</dt
+            ><dd>{{ assetDetail.asset.mediaKind }} · {{ assetDetail.asset.contentType }}</dd></div
+          >
+          <div
+            ><dt>尺寸</dt
+            ><dd>{{ assetDetail.asset.width }} × {{ assetDetail.asset.height }}</dd></div
+          >
+          <div
+            ><dt>SHA-256</dt
+            ><dd
+              ><code>{{ assetDetail.asset.sha256 }}</code></dd
+            ></div
+          >
+          <div
+            ><dt>场景 / 设备</dt
+            ><dd
+              >{{ assetDetail.asset.businessScene || '未分类' }} ·
+              {{ assetDetail.asset.sourceDevice || '未知' }}</dd
+            ></div
+          >
+        </dl>
+        <el-alert
+          v-if="assetDetail.asset.status === 'DELETED'"
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="`回收站保留 ${assetDetail.recycleRetentionDays} 天；${assetDetail.purgeEligibleAt ? formatDateTime(assetDetail.purgeEligibleAt) : '删除时间异常'}后才允许物理清理。`"
+        />
+        <section class="reference-section">
+          <header>
+            <div><h3>引用关系</h3><p>标注、冻结数据集和生产反馈对该资产的治理引用。</p></div>
+            <el-tag>{{ assetDetail.references.length }} 项</el-tag>
+          </header>
+          <article
+            v-for="reference in assetDetail.references"
+            :key="`${reference.resourceType}-${reference.resourceId}`"
+          >
+            <span>{{ reference.resourceType }}</span>
+            <strong>{{ reference.name || `#${reference.resourceId}` }}</strong>
+            <el-tag size="small" :type="reference.frozen ? 'danger' : 'info'">
+              {{ reference.status || (reference.frozen ? 'FROZEN' : 'REFERENCED') }}
+            </el-tag>
+          </article>
+          <p v-if="!assetDetail.references.length" class="empty-reference"
+            >当前资产尚未被业务对象引用。</p
+          >
+        </section>
+      </div>
+    </el-drawer>
   </main>
 </template>
 
 <script lang="ts" setup>
 import {
   createAssetImport,
+  analyzeAssetSimilarity,
+  getAssetDetail,
   getAssetImport,
   getAssetPage,
   getAssetQuality,
+  purgeAsset,
   recycleAsset,
+  restoreAsset,
   uploadAsset,
   type Asset,
+  type AssetDetail,
   type AssetQuality
 } from '@/api/ai-platform/assets'
 import { getProjectPage, type Project } from '@/api/ai-platform/projects'
@@ -274,21 +454,41 @@ const total = ref(0)
 const loading = ref(false)
 const saving = ref(false)
 const uploading = ref(false)
+const similarityLoading = ref(false)
 const uploadProgress = ref(0)
 const importVisible = ref(false)
+const metadataVisible = ref(false)
 const tagDialogVisible = ref(false)
 const collectionDialogVisible = ref(false)
+const detailVisible = ref(false)
+const detailLoading = ref(false)
+const assetDetail = ref<AssetDetail>()
 const tagDefinitions = ref<AssetTagDefinition[]>([])
 const selectedAssetIds = ref<number[]>([])
-const quality = reactive<AssetQuality>({ byStatus: [], duplicateGroups: 0 })
+const quality = reactive<AssetQuality>({
+  byStatus: [],
+  duplicateGroups: 0,
+  nearDuplicateGroups: 0
+})
 const query = reactive({
   pageNo: 1,
   pageSize: 12,
   keyword: '',
   status: '',
+  mediaKind: '',
+  errorCode: '',
   tagDefinitionIds: [] as number[]
 })
-const importForm = reactive({ sourceType: 'DIRECTORY', source: '', duplicatePolicy: 'REFERENCE' })
+const importForm = reactive({
+  sourceType: 'DIRECTORY',
+  source: '',
+  duplicatePolicy: 'REFERENCE',
+  businessScene: '',
+  sourceDevice: '',
+  language: ''
+})
+const pendingFiles = ref<File[]>([])
+const uploadMetadata = reactive({ businessScene: '', sourceDevice: '', language: '' })
 const tagForm = reactive({
   mode: 'ADD' as 'ADD' | 'REPLACE' | 'REMOVE',
   definitionIds: [] as number[]
@@ -387,18 +587,55 @@ const saveFilterCollection = async () => {
   }
 }
 
-const selectFile = async (event: Event) => {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file || !projectId.value) return
+const selectFile = (event: Event) => {
+  const files = Array.from((event.target as HTMLInputElement).files || [])
+  if (!files.length || !projectId.value) return
+  pendingFiles.value = files
+  metadataVisible.value = true
+}
+
+const submitUpload = async () => {
+  if (!pendingFiles.value.length || !projectId.value) return
   uploading.value = true
   uploadProgress.value = 0
   try {
-    await uploadAsset(projectId.value, file, (value) => (uploadProgress.value = value))
-    message.success('资产上传、校验和缩略图生成完成')
+    const files = [...pendingFiles.value]
+    for (let index = 0; index < files.length; index += 1) {
+      await uploadAsset(
+        projectId.value,
+        files[index],
+        (value) =>
+          (uploadProgress.value = Math.round(((index + value / 100) / files.length) * 100)),
+        { ...uploadMetadata }
+      )
+    }
+    metadataVisible.value = false
+    message.success(`${files.length} 个媒体的分片上传、内容校验与元数据提取完成`)
     await loadAll()
   } finally {
     uploading.value = false
+    pendingFiles.value = []
     if (fileInput.value) fileInput.value.value = ''
+  }
+}
+
+const cancelUpload = () => {
+  metadataVisible.value = false
+  pendingFiles.value = []
+  if (fileInput.value) fileInput.value.value = ''
+}
+
+const analyzeSimilarity = async () => {
+  if (!projectId.value) return
+  similarityLoading.value = true
+  try {
+    const result = await analyzeAssetSimilarity(projectId.value)
+    message.success(
+      `FiftyOne 已分析 ${result.analyzedCount} 张图像，发现 ${result.groups.length} 个近似重复组`
+    )
+    await loadAll()
+  } finally {
+    similarityLoading.value = false
   }
 }
 
@@ -409,7 +646,16 @@ const submitImport = async () => {
   }
   saving.value = true
   try {
-    const data = await createAssetImport(projectId.value, { ...importForm, options: {} })
+    const data = await createAssetImport(projectId.value, {
+      sourceType: importForm.sourceType,
+      source: importForm.source,
+      duplicatePolicy: importForm.duplicatePolicy,
+      options: {
+        businessScene: importForm.businessScene,
+        sourceDevice: importForm.sourceDevice,
+        language: importForm.language
+      }
+    })
     importVisible.value = false
     message.success(`导入任务 #${data.importRun.jobId} 已进入队列`)
     const timer = window.setInterval(async () => {
@@ -431,6 +677,39 @@ const removeAsset = async (asset: Asset) => {
   await recycleAsset(projectId.value, asset.id)
   await loadAll()
 }
+
+const openAssetDetail = async (asset: Asset) => {
+  if (!projectId.value) return
+  detailVisible.value = true
+  detailLoading.value = true
+  try {
+    assetDetail.value = await getAssetDetail(projectId.value, asset.id)
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+const doRestoreAsset = async (asset: Asset) => {
+  if (!projectId.value) return
+  await restoreAsset(projectId.value, asset.id)
+  message.success('资产已从回收站恢复')
+  await loadAll()
+}
+
+const doPurgeAsset = async (asset: Asset) => {
+  if (!projectId.value) return
+  await message.confirm(
+    '仅无冻结或业务引用的资产可永久清理；对象删除后不可恢复。确认继续？',
+    '永久清理资产'
+  )
+  await purgeAsset(projectId.value, asset.id)
+  message.success('资产对象已按保留策略永久清理')
+  await loadAll()
+}
+
+const formatDateTime = (value: string) => new Date(value).toLocaleString('zh-CN', { hour12: false })
+const isPurgeEligible = (asset: Asset) =>
+  Boolean(asset.purgeEligibleAt && Date.now() >= new Date(asset.purgeEligibleAt).getTime())
 
 onMounted(async () => {
   const data = await getProjectPage({ pageNo: 1, pageSize: 100 })
@@ -622,6 +901,96 @@ onMounted(async () => {
   font-size: 11px;
   color: var(--text-tertiary);
   border-top: 1px solid var(--divider);
+}
+
+.asset-detail {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.detail-preview {
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+}
+
+.detail-heading,
+.reference-section > header,
+.reference-section article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.detail-heading {
+  h2 {
+    margin: 2px 0 0;
+    font-size: 19px;
+  }
+
+  small {
+    color: var(--text-tertiary);
+  }
+}
+
+.detail-grid {
+  display: grid;
+  margin: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+
+  div {
+    min-width: 0;
+    padding: var(--space-3);
+    background: var(--bg-canvas);
+    border-radius: var(--radius-md);
+  }
+
+  dt {
+    margin-bottom: 4px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+  }
+
+  dd {
+    overflow: hidden;
+    margin: 0;
+    text-overflow: ellipsis;
+  }
+}
+
+.reference-section {
+  padding: var(--space-4);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+
+  h3 {
+    margin: 0;
+    font-size: 16px;
+  }
+
+  header p,
+  .empty-reference {
+    margin: 2px 0 0;
+    font-size: 12px;
+    color: var(--text-tertiary);
+  }
+
+  article {
+    display: grid;
+    padding: 12px 0;
+    border-top: 1px solid var(--divider);
+    grid-template-columns: 140px 1fr auto;
+
+    span {
+      font-size: 11px;
+      color: var(--text-tertiary);
+    }
+  }
 }
 
 .empty-state {

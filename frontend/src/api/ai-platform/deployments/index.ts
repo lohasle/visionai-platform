@@ -19,6 +19,8 @@ export interface DeploymentRevision {
   status: string
   config: string
   artifactSha256: string
+  changeReason: string
+  approvalRequestId: number
   activatedAt?: string
 }
 
@@ -90,12 +92,31 @@ export const getDeployments = (projectId: number) =>
 export const createDeployment = (projectId: number, data: Record<string, unknown>) =>
   request.post({ url: `/ai-platform/projects/${projectId}/deployments`, data })
 
+export const createDeploymentRevision = (
+  projectId: number,
+  deploymentId: number,
+  data: Record<string, unknown>
+) =>
+  request.post({
+    url: `/ai-platform/projects/${projectId}/deployments/${deploymentId}/revisions`,
+    data
+  })
+
 export const getDeployment = (projectId: number, deploymentId: number) =>
   request.get<{
     deployment: Deployment
     revisions: DeploymentRevision[]
     traces: InferenceTrace[]
     metrics: Record<string, number>
+    drift: {
+      status: 'BASELINE_REQUIRED' | 'NO_CURRENT_SAMPLES' | 'STABLE' | 'WATCH' | 'DRIFTED'
+      windowMinutes: number
+      sampleCount: number
+      classPSI?: number
+      confidenceDelta?: number
+      emptyRateDelta?: number
+      baseline?: Record<string, any>
+    }
     inferenceStatus: InferenceStatus
     alertRules: Array<{
       id: number
@@ -103,12 +124,22 @@ export const getDeployment = (projectId: number, deploymentId: number) =>
       metric: string
       operator: string
       threshold: number
+      durationSeconds: number
+      notificationChannel: string
+      recipients: string
+      silencedUntil?: string
+      silenceReason: string
     }>
     alerts: Array<{
       id: number
       status: string
       message: string
       metricValue: number
+      notificationChannel: string
+      notifiedAt?: string
+      resolvedAt?: string
+      resolution: string
+      recoveryEvent: boolean
       createTime: string
     }>
   }>({ url: `/ai-platform/projects/${projectId}/deployments/${deploymentId}` })
@@ -139,11 +170,12 @@ export const predictImage = (
 export const rollbackDeployment = (
   projectId: number,
   deploymentId: number,
-  targetRevisionId: number
+  targetRevisionId: number,
+  reason: string
 ) =>
   request.post({
     url: `/ai-platform/projects/${projectId}/deployments/${deploymentId}/rollback`,
-    data: { targetRevisionId }
+    data: { targetRevisionId, reason }
   })
 
 export const stopDeployment = (projectId: number, deploymentId: number) =>
@@ -151,6 +183,12 @@ export const stopDeployment = (projectId: number, deploymentId: number) =>
 
 export const restartDeployment = (projectId: number, deploymentId: number) =>
   request.post({ url: `/ai-platform/projects/${projectId}/deployments/${deploymentId}/restart` })
+
+export const captureManualFeedback = (projectId: number, traceId: string, comment: string) =>
+  request.post({
+    url: `/ai-platform/projects/${projectId}/inference-traces/${traceId}/feedback`,
+    data: { comment }
+  })
 
 export const createAlertRule = (
   projectId: number,
@@ -164,3 +202,26 @@ export const createAlertRule = (
 
 export const acknowledgeAlert = (projectId: number, alertId: number) =>
   request.post({ url: `/ai-platform/projects/${projectId}/alerts/${alertId}/acknowledge` })
+
+export const silenceAlertRule = (
+  projectId: number,
+  deploymentId: number,
+  ruleId: number,
+  data: { durationMinutes: number; reason: string }
+) =>
+  request.post({
+    url: `/ai-platform/projects/${projectId}/deployments/${deploymentId}/alert-rules/${ruleId}/silence`,
+    data
+  })
+
+export const resolveAlert = (projectId: number, alertId: number, resolution: string) =>
+  request.post({
+    url: `/ai-platform/projects/${projectId}/alerts/${alertId}/resolve`,
+    data: { resolution }
+  })
+
+export const saveDriftBaseline = (projectId: number, deploymentId: number, windowMinutes: number) =>
+  request.post({
+    url: `/ai-platform/projects/${projectId}/deployments/${deploymentId}/drift-baseline`,
+    data: { windowMinutes }
+  })

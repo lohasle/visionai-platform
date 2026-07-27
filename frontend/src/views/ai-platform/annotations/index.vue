@@ -10,6 +10,9 @@
         <el-button @click="mappingVisible = true">
           <Icon icon="lucide:users-round" :size="16" />协作身份
         </el-button>
+        <el-button :disabled="!projectId" @click="showPreannotationComparison">
+          <Icon icon="lucide:chart-no-axes-combined" :size="16" />预标注效果
+        </el-button>
         <el-button type="primary" :disabled="!projectId" @click="createVisible = true">
           <Icon icon="lucide:plus" :size="16" />创建任务
         </el-button>
@@ -21,7 +24,7 @@
         <el-option
           v-for="project in projects"
           :key="project.id"
-          :label="project.name"
+          :label="`${project.name} · ${project.code}`"
           :value="project.id"
         />
       </el-select>
@@ -84,6 +87,14 @@
           >
             开始标注
           </el-button>
+          <el-button
+            v-if="task.status === 'READY' && task.externalBindingId"
+            type="primary"
+            plain
+            @click="openPreannotation(task)"
+          >
+            GPU 预标注
+          </el-button>
           <el-button v-if="task.status === 'ANNOTATING'" @click="advance(task, 'REVIEWING')">
             提交审核
           </el-button>
@@ -103,8 +114,11 @@
           <el-button v-if="task.externalBindingId" link type="primary" @click="openWorkbench(task)">
             内嵌 CVAT
           </el-button>
-          <el-button v-if="task.currentRevisionId" link @click="showDetail(task)"
-            >查看 Revision</el-button
+          <el-button
+            v-if="task.currentRevisionId || task.preannotationRunId"
+            link
+            @click="showDetail(task)"
+            >查看证据</el-button
           >
         </div>
       </article>
@@ -149,6 +163,16 @@
             </el-select>
           </el-form-item>
         </div>
+        <el-form-item label="计划日期">
+          <el-date-picker
+            v-model="form.planRange"
+            class="full-width"
+            type="datetimerange"
+            value-format="YYYY-MM-DDTHH:mm:ssZ"
+            start-placeholder="计划开始"
+            end-placeholder="计划完成"
+          />
+        </el-form-item>
         <el-alert
           v-if="!ontologyVersions.length"
           :closable="false"
@@ -262,6 +286,170 @@
           detail.revisions[0].snapshotUri
         }}</el-descriptions-item>
       </el-descriptions>
+      <template v-if="detail?.preannotationRuns?.length">
+        <el-divider content-position="left">预标注运行与人工修正</el-divider>
+        <article
+          v-for="run in detail.preannotationRuns"
+          :key="run.id"
+          class="preannotation-evidence"
+        >
+          <div>
+            <strong>运行 #{{ run.id }} · 模型版本 #{{ run.modelVersionId }}</strong>
+            <el-tag size="small" :type="run.status === 'FAILED' ? 'danger' : 'success'">{{
+              run.status
+            }}</el-tag>
+          </div>
+          <p>
+            建议 {{ run.proposedCount }} · 接受 {{ run.acceptedCount }} · 删除
+            {{ run.deletedCount }} · 修改 {{ run.modifiedCount }} · 新增 {{ run.addedCount }} · 修正
+            {{ run.correctionSeconds }} 秒
+          </p>
+          <el-button
+            v-if="run.status === 'IMPORTED' || run.status === 'SUCCEEDED'"
+            size="small"
+            @click="openMetrics(detail!.task, run)"
+            >登记修正指标</el-button
+          >
+          <p v-if="run.errorMessage" class="error">{{ run.errorCode }} · {{ run.errorMessage }}</p>
+        </article>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="preannotationVisible" title="运行预标注" width="720">
+      <el-alert
+        :closable="false"
+        show-icon
+        type="info"
+        title="仅显示已批准用于预标注的模型；任务由独立编排器执行真实推理并幂等写入 CVAT。"
+      />
+      <el-form class="preannotation-form" label-position="top">
+        <el-form-item label="模型版本">
+          <el-select v-model="preannotationForm.modelVersionId" class="full-width">
+            <el-option
+              v-for="version in eligibleModels"
+              :key="version.id"
+              :label="`${modelName(version.modelId)} · ${version.semanticVersion} · #${version.id}`"
+              :value="version.id"
+            />
+          </el-select>
+        </el-form-item>
+        <div class="form-grid">
+          <el-form-item label="最低置信度">
+            <el-input-number
+              v-model="preannotationForm.confidence"
+              :min="0"
+              :max="1"
+              :step="0.05"
+            />
+          </el-form-item>
+          <el-form-item label="NMS IoU">
+            <el-input-number v-model="preannotationForm.nms" :min="0.05" :max="1" :step="0.05" />
+          </el-form-item>
+          <el-form-item label="批大小">
+            <el-input-number v-model="preannotationForm.batchSize" :min="1" :max="128" />
+          </el-form-item>
+          <el-form-item label="设备">
+            <el-radio-group v-model="preannotationForm.device">
+              <el-radio-button value="GPU">GPU</el-radio-button>
+              <el-radio-button value="CPU">CPU</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+        </div>
+        <div class="form-grid">
+          <el-form-item label="低置信结果">
+            <el-select v-model="preannotationForm.lowConfidencePolicy">
+              <el-option label="丢弃" value="DROP" />
+              <el-option label="保留待审核" value="KEEP_REVIEW" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="保留下限">
+            <el-input-number
+              v-model="preannotationForm.lowConfidenceFloor"
+              :min="0"
+              :max="preannotationForm.confidence"
+              :step="0.05"
+            />
+          </el-form-item>
+        </div>
+        <el-form-item label="类别映射（JSON，可选）">
+          <el-input
+            v-model="preannotationForm.classMappingText"
+            type="textarea"
+            :rows="4"
+            placeholder='{"source_label_code":"目标类别名称"}'
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="preannotationVisible = false">取消</el-button>
+        <el-button type="primary" :loading="preannotationSaving" @click="submitPreannotation"
+          >进入 GPU 队列</el-button
+        >
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="metricsVisible" title="登记人工修正指标" width="620">
+      <el-form label-position="top">
+        <div class="form-grid">
+          <el-form-item label="模型建议"
+            ><el-input-number v-model="metricsForm.proposedCount" :min="0"
+          /></el-form-item>
+          <el-form-item label="直接接受"
+            ><el-input-number v-model="metricsForm.acceptedCount" :min="0"
+          /></el-form-item>
+          <el-form-item label="删除"
+            ><el-input-number v-model="metricsForm.deletedCount" :min="0"
+          /></el-form-item>
+          <el-form-item label="修改"
+            ><el-input-number v-model="metricsForm.modifiedCount" :min="0"
+          /></el-form-item>
+          <el-form-item label="人工新增"
+            ><el-input-number v-model="metricsForm.addedCount" :min="0"
+          /></el-form-item>
+          <el-form-item label="修正耗时（秒）"
+            ><el-input-number v-model="metricsForm.correctionSeconds" :min="0"
+          /></el-form-item>
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="metricsVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveMetrics">保存可审计指标</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="comparisonVisible" title="预标注模型效果对比" width="980">
+      <el-table :data="comparisons">
+        <el-table-column label="运行 / 模型" min-width="160">
+          <template #default="{ row }">#{{ row.run.id }} / #{{ row.run.modelVersionId }}</template>
+        </el-table-column>
+        <el-table-column label="接受率"
+          ><template #default="{ row }">{{
+            percent(row.acceptanceRate)
+          }}</template></el-table-column
+        >
+        <el-table-column label="删除率"
+          ><template #default="{ row }">{{ percent(row.deletionRate) }}</template></el-table-column
+        >
+        <el-table-column label="修改率"
+          ><template #default="{ row }">{{
+            percent(row.modificationRate)
+          }}</template></el-table-column
+        >
+        <el-table-column label="新增率"
+          ><template #default="{ row }">{{ percent(row.additionRate) }}</template></el-table-column
+        >
+        <el-table-column label="单位修正"
+          ><template #default="{ row }"
+            >{{ row.unitCorrectionSeconds.toFixed(1) }}s</template
+          ></el-table-column
+        >
+        <el-table-column label="类别 / 场景" min-width="230">
+          <template #default="{ row }">
+            <span>{{ breakdownText(row.breakdown?.byClass) }}</span>
+            <small>{{ breakdownText(row.breakdown?.byScene) }}</small>
+          </template>
+        </el-table-column>
+      </el-table>
     </el-dialog>
 
     <EmbeddedWorkbench
@@ -280,22 +468,28 @@
 import EmbeddedWorkbench from '@/views/ai-platform/components/EmbeddedWorkbench.vue'
 import {
   createAnnotationTask,
+  createPreannotation,
   exportAnnotationTask,
   getAnnotationTask,
   getAnnotationTasks,
   getAssetCollections,
   getCVATUserMappings,
+  getPreannotationComparisons,
   openAnnotationWorkbench,
   prepareAnnotationTask,
   reviewAnnotationTask,
   saveCVATUserMapping,
   syncAnnotationTask,
   updateAnnotationStatus,
+  updatePreannotationMetrics,
   type AnnotationStatus,
   type AnnotationTask,
   type AssetCollection,
-  type CVATUserMapping
+  type CVATUserMapping,
+  type PreannotationComparison,
+  type PreannotationRun
 } from '@/api/ai-platform/annotations'
+import { getModels, type ModelRecord, type ModelVersion } from '@/api/ai-platform/models'
 import {
   getProjectPage,
   getProjectMembers,
@@ -340,11 +534,21 @@ const createVisible = ref(false)
 const mappingVisible = ref(false)
 const detailVisible = ref(false)
 const workbenchVisible = ref(false)
+const preannotationVisible = ref(false)
+const preannotationSaving = ref(false)
+const metricsVisible = ref(false)
+const comparisonVisible = ref(false)
 const workbenchUrl = ref('')
 const workbenchTitle = ref('CVAT 标注工作台')
 const workbenchContext = ref('')
 const activeWorkbenchTask = ref<AnnotationTask>()
 const detail = ref<Awaited<ReturnType<typeof getAnnotationTask>>>()
+const modelRecords = ref<ModelRecord[]>([])
+const modelVersions = ref<ModelVersion[]>([])
+const comparisons = ref<PreannotationComparison[]>([])
+const activePreannotationTask = ref<AnnotationTask>()
+const activeMetricsTask = ref<AnnotationTask>()
+const activeMetricsRun = ref<PreannotationRun>()
 const query = reactive({ pageNo: 1, pageSize: 50, status: '' })
 const form = reactive({
   name: '',
@@ -352,10 +556,36 @@ const form = reactive({
   collectionId: undefined as number | undefined,
   ontologyVersionId: undefined as number | undefined,
   annotatorIds: [] as number[],
-  reviewerIds: [] as number[]
+  reviewerIds: [] as number[],
+  planRange: [] as string[]
+})
+const preannotationForm = reactive({
+  modelVersionId: undefined as number | undefined,
+  confidence: 0.5,
+  nms: 0.5,
+  batchSize: 8,
+  device: 'GPU' as 'GPU' | 'CPU',
+  lowConfidencePolicy: 'KEEP_REVIEW' as 'DROP' | 'KEEP_REVIEW',
+  lowConfidenceFloor: 0.1,
+  classMappingText: '{}'
+})
+const metricsForm = reactive({
+  proposedCount: 0,
+  acceptedCount: 0,
+  deletedCount: 0,
+  modifiedCount: 0,
+  addedCount: 0,
+  correctionSeconds: 0
 })
 const mappingUserId = ref<number>()
 const frozenCollections = computed(() => collections.value.filter((item) => item.frozen))
+const eligibleModels = computed(() =>
+  modelVersions.value.filter(
+    (version) => version.status === 'APPROVED' && version.preannotationApproved
+  )
+)
+const modelName = (modelId: number) =>
+  modelRecords.value.find((model) => model.id === modelId)?.name || `模型 #${modelId}`
 const memberByUser = computed(() => new Map(members.value.map((member) => [member.userId, member])))
 const projectUsers = computed(() => users.value.filter((user) => memberByUser.value.has(user.id)))
 const annotatorOptions = computed(() =>
@@ -414,15 +644,19 @@ const loadTasks = async () => {
 }
 const loadAll = async () => {
   if (!projectId.value) return
-  const [, collectionRows, memberRows, versionRows] = await Promise.all([
+  const [, collectionRows, memberRows, versionRows, modelData] = await Promise.all([
     loadTasks(),
     getAssetCollections(projectId.value),
     getProjectMembers(projectId.value),
-    getPublishedOntologyVersions(projectId.value)
+    getPublishedOntologyVersions(projectId.value),
+    getModels(projectId.value)
   ])
   collections.value = collectionRows
   members.value = memberRows
   ontologyVersions.value = versionRows
+  modelRecords.value = modelData.models
+  modelVersions.value = modelData.versions
+  preannotationForm.modelVersionId = eligibleModels.value[0]?.id
   form.collectionId = frozenCollections.value[0]?.id
   form.ontologyVersionId = ontologyVersions.value[0]?.id
   form.annotatorIds = annotatorOptions.value.slice(0, 1).map((user) => user.id)
@@ -448,7 +682,9 @@ const submitCreate = async () => {
       collectionId: form.collectionId,
       ontologyVersionId: form.ontologyVersionId,
       annotatorIds: form.annotatorIds,
-      reviewerIds: form.reviewerIds
+      reviewerIds: form.reviewerIds,
+      planStartAt: form.planRange[0] || undefined,
+      planEndAt: form.planRange[1] || undefined
     })
     createVisible.value = false
     message.success('标注任务草稿已创建')
@@ -516,6 +752,79 @@ const openWorkbenchExternal = async () => {
 const showDetail = async (task: AnnotationTask) => {
   detail.value = await getAnnotationTask(projectId.value!, task.id)
   detailVisible.value = true
+}
+const openPreannotation = (task: AnnotationTask) => {
+  activePreannotationTask.value = task
+  preannotationForm.modelVersionId = eligibleModels.value[0]?.id
+  preannotationVisible.value = true
+}
+const submitPreannotation = async () => {
+  if (!projectId.value || !activePreannotationTask.value || !preannotationForm.modelVersionId)
+    return message.warning('当前项目没有已批准用于预标注的模型')
+  let classMapping: Record<string, string>
+  try {
+    classMapping = JSON.parse(preannotationForm.classMappingText || '{}')
+  } catch {
+    return message.warning('类别映射必须是 JSON 对象')
+  }
+  preannotationSaving.value = true
+  try {
+    await createPreannotation(projectId.value, activePreannotationTask.value.id, {
+      modelVersionId: preannotationForm.modelVersionId,
+      parameters: {
+        confidence: preannotationForm.confidence,
+        nms: preannotationForm.nms,
+        classMapping,
+        batchSize: preannotationForm.batchSize,
+        device: preannotationForm.device,
+        lowConfidencePolicy: preannotationForm.lowConfidencePolicy,
+        lowConfidenceFloor: preannotationForm.lowConfidenceFloor
+      }
+    })
+    preannotationVisible.value = false
+    message.success('真实模型预标注已进入独立编排器队列')
+    await loadTasks()
+  } finally {
+    preannotationSaving.value = false
+  }
+}
+const openMetrics = (task: AnnotationTask, run: PreannotationRun) => {
+  activeMetricsTask.value = task
+  activeMetricsRun.value = run
+  Object.assign(metricsForm, {
+    proposedCount: run.proposedCount,
+    acceptedCount: run.acceptedCount,
+    deletedCount: run.deletedCount,
+    modifiedCount: run.modifiedCount,
+    addedCount: run.addedCount,
+    correctionSeconds: run.correctionSeconds
+  })
+  metricsVisible.value = true
+}
+const saveMetrics = async () => {
+  if (!projectId.value || !activeMetricsTask.value || !activeMetricsRun.value) return
+  await updatePreannotationMetrics(
+    projectId.value,
+    activeMetricsTask.value.id,
+    activeMetricsRun.value.id,
+    { ...metricsForm }
+  )
+  metricsVisible.value = false
+  message.success('预标注人工修正指标已保存')
+  detail.value = await getAnnotationTask(projectId.value, activeMetricsTask.value.id)
+}
+const showPreannotationComparison = async () => {
+  if (!projectId.value) return
+  comparisons.value = await getPreannotationComparisons(projectId.value)
+  comparisonVisible.value = true
+}
+const percent = (value: number) => `${(Number(value || 0) * 100).toFixed(1)}%`
+const breakdownText = (value?: Record<string, number>) => {
+  if (!value || !Object.keys(value).length) return '暂无分项'
+  return Object.entries(value)
+    .slice(0, 4)
+    .map(([key, count]) => `${key} ${count}`)
+    .join(' · ')
 }
 const saveMapping = async () => {
   if (!mappingUserId.value) return message.warning('请选择底座用户')
@@ -698,6 +1007,26 @@ onMounted(async () => {
 
 .identity-user-select {
   min-width: 320px;
+}
+
+.preannotation-form {
+  margin-top: 18px;
+}
+
+.preannotation-evidence {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.preannotation-evidence > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.preannotation-evidence p {
+  margin: 8px 0;
+  color: var(--text-secondary);
 }
 
 code {

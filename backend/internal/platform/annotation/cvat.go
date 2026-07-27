@@ -46,6 +46,11 @@ type Task struct {
 	AssigneeID int64  `json:"assignee_id"`
 }
 
+type Project struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
 type User struct {
 	ID        int64  `json:"id"`
 	Username  string `json:"username"`
@@ -147,6 +152,46 @@ func (c *CVAT) CreateTask(ctx context.Context, name string, labels []Label, segm
 	return task, err
 }
 
+func (c *CVAT) CreateProject(ctx context.Context, name string, labels []Label) (Project, error) {
+	for index := range labels {
+		if labels[index].Type == "" {
+			labels[index].Type = "rectangle"
+		}
+	}
+	body, _ := json.Marshal(map[string]any{"name": name, "labels": labels})
+	resp, err := c.request(ctx, http.MethodPost, "/api/projects", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return Project{}, err
+	}
+	defer resp.Body.Close()
+	var project Project
+	if err = json.NewDecoder(resp.Body).Decode(&project); err != nil {
+		return Project{}, err
+	}
+	if project.ID == 0 {
+		return Project{}, errors.New("CVAT project creation returned no id")
+	}
+	return project, nil
+}
+
+func (c *CVAT) CreateTaskInProject(ctx context.Context, name string, projectID int64, segmentSize int) (Task, error) {
+	if projectID <= 0 {
+		return Task{}, errors.New("CVAT project id is required")
+	}
+	if segmentSize < 1 {
+		segmentSize = 50
+	}
+	body, _ := json.Marshal(map[string]any{"name": name, "project_id": projectID, "segment_size": segmentSize})
+	resp, err := c.request(ctx, http.MethodPost, "/api/tasks", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return Task{}, err
+	}
+	defer resp.Body.Close()
+	var task Task
+	err = json.NewDecoder(resp.Body).Decode(&task)
+	return task, err
+}
+
 func (c *CVAT) AttachData(ctx context.Context, taskID int64, media []Media) error {
 	if len(media) == 0 {
 		return errors.New("CVAT task requires at least one media file")
@@ -221,6 +266,10 @@ func (c *CVAT) PutAnnotations(ctx context.Context, taskID int64, annotations []b
 
 func (c *CVAT) TaskURL(taskID int64) string {
 	return fmt.Sprintf("%s/tasks/%d", c.publicURL, taskID)
+}
+
+func (c *CVAT) ProjectURL(projectID int64) string {
+	return fmt.Sprintf("%s/projects/%d", c.publicURL, projectID)
 }
 
 func (c *CVAT) JobURL(taskID, jobID int64) string {

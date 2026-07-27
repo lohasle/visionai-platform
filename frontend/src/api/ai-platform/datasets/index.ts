@@ -66,10 +66,14 @@ export const createDatasetVersion = (
   data: {
     sourceType: string
     sourceId: number
+    parentId: number
     annotationRevisionId: number
     ontologyVersionId: number
+    splitMode: string
     splitSeed: number
     split: Record<string, number>
+    splitRules: Array<{ field: string; operator: string; value: string; split: string }>
+    externalAssignments: Record<string, string>
   }
 ) =>
   request.post<DatasetVersion>({

@@ -5,6 +5,8 @@ param(
     [string]$AdminPassword = "admin123",
     [string]$ReviewerUsername = "visionai-reviewer",
     [string]$ReviewerPassword = "VisionAI-Review-2026!",
+    [string]$ApproverUsername = "visionai-approver",
+    [string]$ApproverPassword = "VisionAI-Approve-2026!",
     [string]$RunTag = (Get-Date -Format "yyyyMMdd-HHmmss")
 )
 
@@ -154,15 +156,45 @@ if ([int]$reviewerPage.total -eq 0) {
 $systemRoles = @(Invoke-VisionAI -Method Get -Path "/system/role/simple-list")
 $reviewerRoleIds = @(
     $systemRoles |
-        Where-Object { $_.code -in @("REVIEWER", "APPROVER", "AUDITOR") } |
+        Where-Object { $_.code -in @("REVIEWER", "APPROVER", "AUDITOR", "DATA_MANAGER") } |
         ForEach-Object { [int64]$_.id }
 )
-if ($reviewerRoleIds.Count -ne 3) {
-    throw "VisionAI system roles are incomplete; expected REVIEWER, APPROVER and AUDITOR"
+if ($reviewerRoleIds.Count -ne 4) {
+    throw "VisionAI system roles are incomplete; expected REVIEWER, APPROVER, AUDITOR and DATA_MANAGER"
 }
 Invoke-VisionAI -Method Post -Path "/system/permission/assign-user-role" -Body @{
     userId = $reviewerId
     roleIds = $reviewerRoleIds
+} | Out-Null
+$approverPage = Invoke-VisionAI -Method Get -Path "/system/user/page?pageNo=1&pageSize=20&username=$ApproverUsername"
+if ([int]$approverPage.total -eq 0) {
+    $approverId = Invoke-VisionAI -Method Post -Path "/system/user/create" -Body @{
+        username = $ApproverUsername
+        password = $ApproverPassword
+        nickname = "VisionAI Production Approver"
+        status = 0
+        deptId = 0
+        postIds = @()
+        roleIds = @()
+    }
+} else {
+    $approverId = [int64]$approverPage.list[0].id
+    Invoke-VisionAI -Method Put -Path "/system/user/update-password" -Body @{
+        id = $approverId
+        password = $ApproverPassword
+    } | Out-Null
+}
+$approverRoleId = [int64](
+    $systemRoles |
+        Where-Object { $_.code -eq "APPROVER" } |
+        Select-Object -First 1
+).id
+if ($approverRoleId -le 0) {
+    throw "VisionAI APPROVER system role is missing"
+}
+Invoke-VisionAI -Method Post -Path "/system/permission/assign-user-role" -Body @{
+    userId = $approverId
+    roleIds = @($approverRoleId)
 } | Out-Null
 
 Write-Step "Creating the COCO128 acceptance project"
@@ -175,6 +207,9 @@ $projectId = [int64]$project.id
 Invoke-VisionAI -Method Put -Path "/ai-platform/projects/$projectId/status" -Body @{ status = "ACTIVE" } | Out-Null
 Invoke-VisionAI -Method Put -Path "/ai-platform/projects/$projectId/members" -Body @{
     userId = $reviewerId
+} | Out-Null
+Invoke-VisionAI -Method Put -Path "/ai-platform/projects/$projectId/members" -Body @{
+    userId = $approverId
 } | Out-Null
 Invoke-VisionAI -Method Put -Path "/ai-platform/cvat-user-mappings" -Body @{
     platformUserId = 1
@@ -207,11 +242,28 @@ if ($assetRows.Count -ne 128) {
 }
 $assetIds = @($assetRows | ForEach-Object { [int64]$_.id })
 
+Write-Step "Applying governed business, scene and source tags to all COCO128 assets"
+$tagDefinitions = @(
+    @{ code = "benchmark"; name = "Public benchmark"; category = "BUSINESS"; color = "#2563eb"; description = "Public benchmark data used for repeatable acceptance"; enabled = $true },
+    @{ code = "daylight"; name = "Mixed daylight scenes"; category = "SCENE"; color = "#16a34a"; description = "COCO daylight and mixed-scene imagery"; enabled = $true },
+    @{ code = "ultralytics-coco128"; name = "Ultralytics COCO128"; category = "SOURCE"; color = "#ea580c"; description = "Ultralytics public COCO128 release"; enabled = $true }
+)
+$tagDefinitionIds = @()
+foreach ($definition in $tagDefinitions) {
+    $created = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/tag-definitions" -Body $definition
+    $tagDefinitionIds += [int64]$created.id
+}
+Invoke-VisionAI -Method Put -Path "/ai-platform/projects/$projectId/assets/tags" -Body @{
+    assetIds = $assetIds
+    definitionIds = $tagDefinitionIds
+    mode = "ADD"
+} | Out-Null
+
 Write-Step "Freezing a 128-image asset collection"
 $collection = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/collections" -Body @{
     name = "COCO128 Public Images"
     description = "First 128 images from COCO train2017, used for public pipeline acceptance."
-    filter = @{ source = "COCO128"; imageCount = 128 }
+    filter = @{ source = "COCO128"; imageCount = 128; tagDefinitionIds = $tagDefinitionIds }
 }
 $collectionId = [int64]$collection.id
 Invoke-VisionAI -Method Put -Path "/ai-platform/projects/$projectId/collections/$collectionId/assets" -Body @{ assetIds = $assetIds } | Out-Null
@@ -261,6 +313,7 @@ $annotationTask = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$pro
     name = "COCO128 Ground Truth Review"
     taskType = "CV_DETECTION"
     collectionId = $collectionId
+    tagDefinitionIds = $tagDefinitionIds
     ontologyVersionId = $ontologyVersionId
     annotatorIds = @(1)
     reviewerIds = @(1)
@@ -426,7 +479,19 @@ $templateVersion = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$pr
     parameterSchema = @{ type = "object"; properties = @{ epochs = @{ type = "integer"; minimum = 1 }; batchSize = @{ type = "integer"; minimum = 1 }; learningRate = @{ type = "number"; exclusiveMinimum = 0 }; pretrained = @{ type = "boolean" } } }
     outputProtocol = "visionai.result-manifest.v1"
     resourceRequirements = @{ cpu = 2; memoryBytes = 4294967296; gpuMin = 1; gpuMax = 1 }
-    compatibility = @{ taskTypes = @("CV_DETECTION") }
+    compatibility = @{
+        datasetTypes = @("CV_DETECTION")
+        modelTypes = @("CV_DETECTION")
+        providers = @("LOCAL_DOCKER", "CLEARML")
+        cudaRange = ">=12.0 <13.0"
+        driverRange = ">=550"
+        minCUDA = "12.0"
+        minDriver = "550"
+        providerVersions = @{
+            LOCAL_DOCKER = "Docker Engine 27+"
+            CLEARML = "2.x"
+        }
+    }
     licensePolicy = @{ allowed = $true; dataset = "COCO128" }
 }
 $templateVersionId = [int64]$templateVersion.id
@@ -482,12 +547,19 @@ $modelVersionId = [int64]$modelVersion.id
 $approval = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/model-versions/$modelVersionId/approvals" -Body @{
     approvalType = "PRODUCTION_QUALIFICATION"
     targetEnvironment = "PRODUCTION"
+    riskSummary = "COCO128 may miss small, occluded or low-confidence objects; gate results and failure samples are immutable."
+    rollbackPlan = "Stop the active revision and restore the previous approved model while preserving inference traces and audit evidence."
 }
 $approvalId = [int64]$approval.id
 $reviewerToken = Invoke-Login $ReviewerUsername $ReviewerPassword
 Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/approvals/$approvalId/decision" -AccessToken $reviewerToken -Body @{
     decision = "APPROVE"
     comment = "COCO128 evidence, lineage, quality gate and immutable artifacts verified."
+} | Out-Null
+$approverToken = Invoke-Login $ApproverUsername $ApproverPassword
+Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/approvals/$approvalId/decision" -AccessToken $approverToken -Body @{
+    decision = "APPROVE"
+    comment = "Production risk, rollback plan and release boundary verified."
 } | Out-Null
 
 Write-Step "Deploying, running inference and capturing production feedback"
@@ -524,6 +596,10 @@ $feedbackBatch = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$proj
     sampleIds = @($feedbackSamples | ForEach-Object { [int64]$_.id })
 }
 $feedbackBatchId = [int64]$feedbackBatch.id
+Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/feedback-batches/$feedbackBatchId/review" -AccessToken $reviewerToken -Body @{
+    decision = "PRIVACY_APPROVE"
+    comment = "Redaction, retention and restricted-use evidence verified by a reviewer separate from the batch creator."
+} | Out-Null
 $feedbackReview = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/feedback-batches/$feedbackBatchId/review" -Body @{
     decision = "ACCEPT"
     comment = "Accepted for governed relabeling and the next dataset revision."

@@ -11,6 +11,7 @@ type EvaluationSuite struct {
 	Slices           string    `gorm:"type:json;not null" json:"slices"`
 	Thresholds       string    `gorm:"type:json;not null" json:"thresholds"`
 	GatePolicy       string    `gorm:"size:32;not null" json:"gatePolicy"`
+	AutoTrigger      bool      `gorm:"index;not null;default:false" json:"autoTrigger"`
 	EvaluatorVersion string    `gorm:"size:64;not null" json:"evaluatorVersion"`
 	CreatedBy        uint64    `gorm:"index;not null" json:"createdBy"`
 	CreatedAt        time.Time `json:"createTime"`
@@ -50,20 +51,25 @@ type EvaluationMetric struct {
 }
 
 type EvaluationSample struct {
-	ID              uint64    `gorm:"primaryKey" json:"id"`
-	TenantID        uint64    `gorm:"index;not null" json:"tenantId"`
-	ProjectID       uint64    `gorm:"index;not null" json:"projectId"`
-	EvaluationRunID uint64    `gorm:"uniqueIndex:uk_eval_sample;not null" json:"evaluationRunId"`
-	AssetID         uint64    `gorm:"uniqueIndex:uk_eval_sample;index;not null" json:"assetId"`
-	Split           string    `gorm:"size:16;index;not null" json:"split"`
-	Slice           string    `gorm:"size:128;index;not null" json:"slice"`
-	ErrorType       string    `gorm:"size:24;index;not null" json:"errorType"`
-	Confidence      float64   `json:"confidence"`
-	IoU             float64   `json:"iou"`
-	GTCount         int       `json:"gtCount"`
-	PredictionCount int       `json:"predictionCount"`
-	LatencyMS       float64   `json:"latencyMs"`
-	CreatedAt       time.Time `json:"createTime"`
+	ID              uint64     `gorm:"primaryKey" json:"id"`
+	TenantID        uint64     `gorm:"index;not null" json:"tenantId"`
+	ProjectID       uint64     `gorm:"index;not null" json:"projectId"`
+	EvaluationRunID uint64     `gorm:"uniqueIndex:uk_eval_sample;not null" json:"evaluationRunId"`
+	AssetID         uint64     `gorm:"uniqueIndex:uk_eval_sample;index;not null" json:"assetId"`
+	Split           string     `gorm:"size:16;index;not null" json:"split"`
+	Slice           string     `gorm:"size:128;index;not null" json:"slice"`
+	CategoryLabels  string     `gorm:"type:json;not null" json:"categoryLabels"`
+	TargetSize      string     `gorm:"size:24;index" json:"targetSize"`
+	Scene           string     `gorm:"size:256;index" json:"scene"`
+	Device          string     `gorm:"size:256;index" json:"device"`
+	CapturedAt      *time.Time `gorm:"index" json:"capturedAt"`
+	ErrorType       string     `gorm:"size:24;index;not null" json:"errorType"`
+	Confidence      float64    `json:"confidence"`
+	IoU             float64    `json:"iou"`
+	GTCount         int        `json:"gtCount"`
+	PredictionCount int        `json:"predictionCount"`
+	LatencyMS       float64    `json:"latencyMs"`
+	CreatedAt       time.Time  `json:"createTime"`
 }
 
 type EvaluationSavedSlice struct {

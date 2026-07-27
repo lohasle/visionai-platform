@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/config"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/storage"
 	platformtraining "github.com/lohasle/nimbus-framework-go/internal/platform/training"
@@ -36,6 +37,9 @@ func processTrainingEvent(ctx context.Context, db *gorm.DB, cfg config.Config, e
 		return nil
 	}
 	if run.Status == TrainingSucceeded || run.Status == TrainingCancelled {
+		if run.Status == TrainingSucceeded {
+			return enqueueAutomaticEvaluations(db, &run)
+		}
 		return nil
 	}
 	if run.CancelRequestedAt != nil {
@@ -76,6 +80,7 @@ func processTrainingEvent(ctx context.Context, db *gorm.DB, cfg config.Config, e
 	if err != nil || strings.HasPrefix(inputRelative, "..") {
 		return failTrainingRun(db, &run, "RESOURCE", "WORK_ROOT_ESCAPE", "training input directory escapes configured root")
 	}
+	defer cleanupTrainingWorkspace(workRoot, run.ID)
 	var runtimeSpec struct {
 		MemoryBytes int64   `json:"memoryBytes"`
 		CPUs        float64 `json:"cpus"`
@@ -107,6 +112,7 @@ func processTrainingEvent(ctx context.Context, db *gorm.DB, cfg config.Config, e
 		Updates(map[string]any{"stage": "RUNNING", "progress": 20})
 	trainingCtx, cancel := context.WithTimeout(ctx, cfg.TrainingTimeout)
 	defer cancel()
+	go watchTrainingCancellation(trainingCtx, db, run.ID, cancel)
 	manifest, log, runErr := (platformtraining.LocalDocker{Binary: cfg.DockerBinary, VolumesFrom: cfg.DockerVolumesFrom}).Run(trainingCtx, platformtraining.LocalDockerSpec{
 		RunID: run.ID, ImageRef: template.ImageRef, Entrypoint: template.Entrypoint, OutputDir: runDir,
 		InputDir:           inputDir,
@@ -114,6 +120,13 @@ func processTrainingEvent(ctx context.Context, db *gorm.DB, cfg config.Config, e
 		MemoryBytes: runtimeSpec.MemoryBytes, CPUs: runtimeSpec.CPUs,
 	})
 	if runErr != nil {
+		var cancellation TrainingRun
+		if db.Select("cancel_requested_at").First(&cancellation, run.ID).Error == nil && cancellation.CancelRequestedAt != nil {
+			_ = storeTrainingLog(context.Background(), db, cfg, &run, log)
+			run.Status, run.FinishedAt = TrainingCancelled, cancellation.CancelRequestedAt
+			db.Save(&run)
+			return finishTrainingJob(db, &run, false, "CANCELLED", "LocalDocker container cancelled and workspace cleaned")
+		}
 		category, code := classifyTrainingFailure(runErr)
 		_ = storeTrainingLog(context.Background(), db, cfg, &run, log)
 		return failTrainingRun(db, &run, category, code, runErr.Error())
@@ -131,7 +144,108 @@ func processTrainingEvent(ctx context.Context, db *gorm.DB, cfg config.Config, e
 	if err = db.Save(&run).Error; err != nil {
 		return err
 	}
+	if err = enqueueAutomaticEvaluations(db, &run); err != nil {
+		return err
+	}
 	return finishTrainingJob(db, &run, true, "", "")
+}
+
+func enqueueAutomaticEvaluations(db *gorm.DB, run *TrainingRun) error {
+	if run == nil || run.Status != TrainingSucceeded {
+		return nil
+	}
+	var suites []EvaluationSuite
+	if err := db.Where(
+		"tenant_id = ? AND project_id = ? AND dataset_version_id = ? AND auto_trigger = ?",
+		run.TenantID, run.ProjectID, run.DatasetVersionID, true,
+	).Order("id").Find(&suites).Error; err != nil {
+		return err
+	}
+	for _, suite := range suites {
+		var existing int64
+		db.Model(&EvaluationRun{}).Where(
+			"tenant_id = ? AND project_id = ? AND suite_id = ? AND training_run_id = ?",
+			run.TenantID, run.ProjectID, suite.ID, run.ID,
+		).Count(&existing)
+		if existing > 0 {
+			continue
+		}
+		var baseline EvaluationRun
+		db.Where(
+			"tenant_id = ? AND project_id = ? AND suite_id = ? AND status = ?",
+			run.TenantID, run.ProjectID, suite.ID, "SUCCEEDED",
+		).Order("id DESC").First(&baseline)
+		evaluation := EvaluationRun{
+			TenantID: run.TenantID, ProjectID: run.ProjectID, SuiteID: suite.ID,
+			TrainingRunID: run.ID, BaselineRunID: baseline.ID, Status: "QUEUED",
+			GateDecision: "PENDING", GateEvidence: "{}", Summary: "{}", CreatedBy: run.CreatedBy,
+		}
+		job := PlatformJob{
+			TenantID: run.TenantID, ProjectID: run.ProjectID, JobType: "EVALUATION",
+			ResourceType: "EVALUATION_RUN", Status: JobQueued, Stage: "QUEUED",
+			TraceID: uuid.NewString(), Idempotency: fmt.Sprintf("auto-evaluation:%d:%d", run.ID, suite.ID),
+			MaxRetries: 2, CreatedBy: run.CreatedBy,
+		}
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&evaluation).Error; err != nil {
+				return err
+			}
+			job.ResourceID = evaluation.ID
+			if err := tx.Create(&job).Error; err != nil {
+				return err
+			}
+			if err := tx.Create(&DatasetUsage{
+				TenantID: run.TenantID, ProjectID: run.ProjectID, DatasetVersionID: suite.DatasetVersionID,
+				ResourceType: "EVALUATION_RUN", ResourceID: evaluation.ID,
+			}).Error; err != nil {
+				return err
+			}
+			return tx.Create(&OutboxEvent{
+				TenantID: run.TenantID, EventID: uuid.NewString(), EventType: "evaluation.run.requested.v1",
+				AggregateType: "EVALUATION_RUN", AggregateID: evaluation.ID,
+				Payload: jsonValue(map[string]any{"evaluationRunId": evaluation.ID, "autoTriggered": true}),
+				Status:  outboxNew,
+			}).Error
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func watchTrainingCancellation(ctx context.Context, db *gorm.DB, runID uint64, cancel context.CancelFunc) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			var run TrainingRun
+			if db.Select("cancel_requested_at").First(&run, runID).Error == nil && run.CancelRequestedAt != nil {
+				cancel()
+				return
+			}
+		}
+	}
+}
+
+func cleanupTrainingWorkspace(workRoot string, runID uint64) {
+	root, err := filepath.Abs(workRoot)
+	if err != nil || runID == 0 {
+		return
+	}
+	for _, candidate := range []string{
+		filepath.Join(root, "runs", strconv.FormatUint(runID, 10)),
+		filepath.Join(root, "inputs", strconv.FormatUint(runID, 10)),
+	} {
+		resolved, resolveErr := filepath.Abs(candidate)
+		relative, relativeErr := filepath.Rel(root, resolved)
+		if resolveErr == nil && relativeErr == nil && relative != "." &&
+			!strings.HasPrefix(relative, ".."+string(filepath.Separator)) && relative != ".." {
+			_ = os.RemoveAll(resolved)
+		}
+	}
 }
 
 func processTrainingTemplateSmokeEvent(ctx context.Context, db *gorm.DB, cfg config.Config, event DomainEventEnvelope) error {
@@ -503,6 +617,7 @@ func processClearMLTraining(ctx context.Context, db *gorm.DB, cfg config.Config,
 			return failTrainingRun(db, run, "RESOURCE", "WORK_ROOT_ESCAPE", "training directory escapes configured root")
 		}
 	}
+	defer cleanupTrainingWorkspace(workRoot, run.ID)
 	if _, err = platformtraining.PrepareOutputDirectory(runDir); err != nil {
 		return failTrainingRun(db, run, "RESOURCE", "OUTPUT_DIRECTORY_INVALID", err.Error())
 	}
@@ -636,7 +751,12 @@ func processClearMLTraining(ctx context.Context, db *gorm.DB, cfg config.Config,
 				summary["externalTaskId"] = external.ID
 				run.MetricSummary = jsonValue(summary)
 				upsertClearMLTrainingNode(db, run, task, manifest)
-				db.Save(run)
+				if err = db.Save(run).Error; err != nil {
+					return err
+				}
+				if err = enqueueAutomaticEvaluations(db, run); err != nil {
+					return err
+				}
 				return finishTrainingJob(db, run, true, "", "")
 			case "failed":
 				return failTrainingRun(db, run, "FRAMEWORK", "CLEARML_TASK_FAILED", task.StatusMessage)
@@ -704,6 +824,8 @@ func finishTrainingJob(db *gorm.DB, run *TrainingRun, success bool, code, messag
 	status, stage, progress := JobFailed, "FAILED", 0
 	if success {
 		status, stage, progress = JobSucceeded, "SUCCEEDED", 100
+	} else if code == "CANCELLED" {
+		status, stage = JobCancelled, "CANCELLED"
 	}
 	return db.Model(&PlatformJob{}).
 		Where("tenant_id = ? AND resource_type = ? AND resource_id = ?", run.TenantID, "TRAINING_RUN", run.ID).

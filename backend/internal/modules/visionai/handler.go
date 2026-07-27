@@ -48,7 +48,7 @@ func page(c *gin.Context) (int, int) {
 // @Security BearerAuth
 // @Success 200 {object} httpx.Response
 // @Router /ai-platform/dashboard/summary [get]
-func (h *Handler) DashboardSummary(c *gin.Context) {
+func (h *Handler) dashboardSummaryLegacy(c *gin.Context) {
 	var running, failed, pending int64
 	if h.db != nil {
 		h.db.Model(&PlatformJob{}).Where("tenant_id = ? AND status IN ?", tenantID(c), []JobStatus{JobQueued, JobRunning}).Count(&running)

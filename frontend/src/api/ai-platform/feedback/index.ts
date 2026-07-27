@@ -7,6 +7,8 @@ export interface FeedbackPolicy {
   confidenceBelow: number
   captureEmpty: boolean
   captureErrors: boolean
+  captureManual: boolean
+  captureDrift: boolean
   dailyLimit: number
   retentionDays: number
   redactionPolicy: string
@@ -35,6 +37,29 @@ export interface FeedbackBatch {
   annotationRevisionId: number
   datasetVersionId: number
   modelVersionId: number
+  privacyReviewedBy: number
+  privacyReviewedAt?: string
+  createTime: string
+}
+
+export interface FeedbackBenefit {
+  id: number
+  feedbackBatchId: number
+  baselineModelVersionId: number
+  candidateModelVersionId: number
+  baselineEvaluationRunId: number
+  candidateEvaluationRunId: number
+  baselineDeploymentId: number
+  candidateDeploymentId: number
+  slices: string
+  baselineQuality: string
+  candidateQuality: string
+  baselineProduction: string
+  candidateProduction: string
+  deltas: string
+  conclusion: 'IMPROVED' | 'NO_BENEFIT'
+  evidenceSnapshot: string
+  evidenceSha256: string
   createTime: string
 }
 
@@ -65,3 +90,10 @@ export const reviewFeedbackBatch = (
   })
 export const cleanupFeedback = (projectId: number) =>
   request.post<{ expired: number }>({ url: `/ai-platform/projects/${projectId}/feedback-cleanup` })
+export const getFeedbackBenefits = (projectId: number) =>
+  request.get<FeedbackBenefit[]>({ url: `/ai-platform/projects/${projectId}/feedback-benefits` })
+export const createFeedbackBenefit = (projectId: number, data: Record<string, unknown>) =>
+  request.post<FeedbackBenefit>({
+    url: `/ai-platform/projects/${projectId}/feedback-benefits`,
+    data
+  })
