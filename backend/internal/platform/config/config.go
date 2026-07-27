@@ -26,6 +26,7 @@ type Config struct {
 	TrainingWorkRoot   string
 	DockerBinary       string
 	DockerVolumesFrom  string
+	DockerNetwork      string
 	TrainingTimeout    time.Duration
 	ClearMLAPIURL      string
 	ClearMLWebURL      string
@@ -68,6 +69,7 @@ func Load() Config {
 		TrainingWorkRoot:   env("NIMBUS_TRAINING_WORK_ROOT", "/training-work"),
 		DockerBinary:       env("NIMBUS_DOCKER_BINARY", "docker"),
 		DockerVolumesFrom:  env("NIMBUS_DOCKER_VOLUMES_FROM", ""),
+		DockerNetwork:      env("NIMBUS_DOCKER_NETWORK", "nimbus-framework-go_default"),
 		TrainingTimeout:    duration("NIMBUS_TRAINING_TIMEOUT", 24*time.Hour),
 		ClearMLAPIURL:      env("NIMBUS_CLEARML_API_URL", ""),
 		ClearMLWebURL:      env("NIMBUS_CLEARML_WEB_URL", ""),

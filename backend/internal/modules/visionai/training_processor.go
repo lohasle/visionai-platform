@@ -488,15 +488,83 @@ func processClearMLTraining(ctx context.Context, db *gorm.DB, cfg config.Config,
 	if err != nil {
 		return failTrainingRun(db, run, "CONFIGURATION", "CLEARML_CONFIG_INVALID", err.Error())
 	}
+	if strings.TrimSpace(cfg.DockerVolumesFrom) == "" {
+		return failTrainingRun(db, run, "CONFIGURATION", "CLEARML_SHARED_VOLUME_REQUIRED", "ClearML Agent requires a configured shared training volume")
+	}
+	workRoot, err := filepath.Abs(cfg.TrainingWorkRoot)
+	if err != nil {
+		return failTrainingRun(db, run, "RESOURCE", "WORK_ROOT_INVALID", err.Error())
+	}
+	runDir := filepath.Join(workRoot, "runs", strconv.FormatUint(run.ID, 10))
+	inputDir := filepath.Join(workRoot, "inputs", strconv.FormatUint(run.ID, 10))
+	for _, path := range []string{runDir, inputDir} {
+		relative, relErr := filepath.Rel(workRoot, path)
+		if relErr != nil || strings.HasPrefix(relative, "..") {
+			return failTrainingRun(db, run, "RESOURCE", "WORK_ROOT_ESCAPE", "training directory escapes configured root")
+		}
+	}
+	if _, err = platformtraining.PrepareOutputDirectory(runDir); err != nil {
+		return failTrainingRun(db, run, "RESOURCE", "OUTPUT_DIRECTORY_INVALID", err.Error())
+	}
+	objectStore, err := storage.NewMinIO(cfg)
+	if err != nil {
+		return failTrainingRun(db, run, "EXTERNAL_SERVICE", "STORAGE_CONFIG_INVALID", err.Error())
+	}
+	if err = objectStore.EnsureBucket(ctx); err != nil {
+		return failTrainingRun(db, run, "EXTERNAL_SERVICE", "STORAGE_UNAVAILABLE", err.Error())
+	}
+	if err = stageTrainingDataset(ctx, db, objectStore, run, dataset, inputDir); err != nil {
+		return failTrainingRun(db, run, "DATA", "DATASET_STAGE_FAILED", err.Error())
+	}
+	var runtimeSpec struct {
+		MemoryBytes int64   `json:"memoryBytes"`
+		CPUs        float64 `json:"cpus"`
+		CPU         float64 `json:"cpu"`
+	}
+	_ = json.Unmarshal([]byte(run.RuntimeSpec), &runtimeSpec)
+	if runtimeSpec.MemoryBytes == 0 {
+		runtimeSpec.MemoryBytes = 1 << 30
+	}
+	if runtimeSpec.CPUs == 0 {
+		runtimeSpec.CPUs = runtimeSpec.CPU
+	}
+	if runtimeSpec.CPUs == 0 {
+		runtimeSpec.CPUs = 1
+	}
 	var parameters map[string]any
 	_ = json.Unmarshal([]byte(run.Parameters), &parameters)
+	if parameters == nil {
+		parameters = map[string]any{}
+	}
 	parameters["visionaiDatasetManifest"] = dataset.ManifestURI
 	parameters["visionaiRunId"] = run.ID
+	containerArguments := []string{
+		"--user", "0:0",
+		"--network", cfg.DockerNetwork,
+		"--volumes-from", cfg.DockerVolumesFrom,
+		"--memory", strconv.FormatInt(runtimeSpec.MemoryBytes, 10),
+		"--cpus", strconv.FormatFloat(runtimeSpec.CPUs, 'f', 2, 64),
+		"--env", "VISIONAI_RUN_ID=" + strconv.FormatUint(run.ID, 10),
+		"--env", "VISIONAI_OUTPUT_DIR=" + runDir,
+		"--env", "VISIONAI_INPUT_DIR=" + inputDir,
+		"--env", "VISIONAI_DATASET_MANIFEST_URI=" + dataset.ManifestURI,
+		"--env", "VISIONAI_PARAMETERS_JSON=" + run.Parameters,
+	}
+	entrypoint := strings.TrimSpace(template.Entrypoint)
+	if entrypoint == "" {
+		// Managed trainer images expose this stable framework entrypoint. An
+		// explicit template entrypoint always takes precedence.
+		entrypoint = "/usr/local/bin/visionai-gpu-trainer"
+	}
 	trainingCtx, cancel := context.WithTimeout(ctx, cfg.TrainingTimeout)
 	defer cancel()
 	external, err := client.CreateAndEnqueue(trainingCtx, platformtraining.ClearMLSpec{
-		Name: run.Name, Queue: run.Queue, ImageRef: template.ImageRef, Entrypoint: template.Entrypoint,
-		Parameters: parameters, Tags: []string{"visionai", "project-" + strconv.FormatUint(run.ProjectID, 10)},
+		Name: run.Name, Queue: run.Queue, ImageRef: template.ImageRef, Entrypoint: entrypoint,
+		ScriptBinary: "python3", ContainerArguments: containerArguments,
+		Parameters: parameters, Tags: []string{
+			"visionai", "project-" + strconv.FormatUint(run.ProjectID, 10),
+			"run-" + strconv.FormatUint(run.ID, 10),
+		},
 	})
 	if err != nil {
 		return failTrainingRun(db, run, "EXTERNAL_SERVICE", "CLEARML_SUBMIT_FAILED", err.Error())
@@ -539,16 +607,35 @@ func processClearMLTraining(ctx context.Context, db *gorm.DB, cfg config.Config,
 				run.Status, run.Progress = TrainingRunning, max(task.Progress, 20)
 				db.Save(run)
 			case "completed", "published":
+				log, logErr := client.TaskLog(trainingCtx, external.ID)
+				if logErr != nil {
+					log = []byte("ClearML console log unavailable: " + logErr.Error() + "\n")
+				}
+				manifest, manifestErr := platformtraining.ReadResultManifest(runDir)
+				if manifestErr != nil {
+					_ = storeTrainingLog(context.Background(), db, cfg, run, log)
+					return failTrainingRun(db, run, "FRAMEWORK", "RESULT_MANIFEST_INVALID", manifestErr.Error())
+				}
+				if metricErr := client.ReportMetrics(trainingCtx, external.ID, manifest.Metrics); metricErr != nil {
+					log = append(log, []byte("\nVisionAI metric mirror warning: "+metricErr.Error()+"\n")...)
+				}
+				run.Status, run.Progress = TrainingExporting, 85
+				db.Save(run)
+				db.Model(&PlatformJob{}).Where("tenant_id = ? AND resource_type = ? AND resource_id = ?", run.TenantID, "TRAINING_RUN", run.ID).
+					Updates(map[string]any{"stage": "EXPORTING", "progress": 85})
+				if err = collectTrainingResults(trainingCtx, db, objectStore, run, runDir, manifest, log); err != nil {
+					return failTrainingRun(db, run, "FRAMEWORK", "RESULT_EXPORT_FAILED", err.Error())
+				}
 				now := time.Now()
 				run.Status, run.Progress, run.FinishedAt = TrainingSucceeded, 100, &now
-				run.ResultManifestURI = "clearml://tasks/" + external.ID
-				run.MetricSummary = jsonValue(map[string]any{"provider": "CLEARML", "externalTaskId": external.ID})
-				digest := sha256.Sum256([]byte(external.ID))
-				db.Create(&TrainingArtifact{
-					TenantID: run.TenantID, ProjectID: run.ProjectID, TrainingRunID: run.ID,
-					Kind: "EXTERNAL_TASK", Name: external.ID, URI: binding.ExternalURL,
-					SHA256: hex.EncodeToString(digest[:]), MediaType: "application/vnd.clearml.task",
-				})
+				summary := make(map[string]any, len(manifest.Summary)+2)
+				for key, value := range manifest.Summary {
+					summary[key] = value
+				}
+				summary["provider"] = "CLEARML"
+				summary["externalTaskId"] = external.ID
+				run.MetricSummary = jsonValue(summary)
+				upsertClearMLTrainingNode(db, run, task, manifest)
 				db.Save(run)
 				return finishTrainingJob(db, run, true, "", "")
 			case "failed":
@@ -557,6 +644,34 @@ func processClearMLTraining(ctx context.Context, db *gorm.DB, cfg config.Config,
 				return failTrainingRun(db, run, "EXTERNAL_SERVICE", "CLEARML_TASK_STOPPED", task.StatusMessage)
 			}
 		}
+	}
+}
+
+func upsertClearMLTrainingNode(db *gorm.DB, run *TrainingRun, task platformtraining.ClearMLTask, manifest platformtraining.ResultManifest) {
+	if strings.TrimSpace(task.WorkerID) == "" {
+		return
+	}
+	nodeKey := "clearml:" + task.WorkerID
+	var node ComputeNode
+	db.Where("tenant_id = ? AND node_key = ?", run.TenantID, nodeKey).First(&node)
+	node.TenantID, node.NodeKey, node.Name = run.TenantID, nodeKey, task.WorkerID
+	node.Status, node.LastHeartbeatAt = "ONLINE", time.Now()
+	node.GPUModel = fmt.Sprint(manifest.Summary["gpuModel"])
+	node.CUDAVersion = fmt.Sprint(manifest.Summary["cudaRuntime"])
+	if value, ok := manifest.Summary["gpuMemoryBytes"].(float64); ok {
+		node.GPUMemoryBytes = int64(value)
+	}
+	if node.GPUModel != "" {
+		node.GPUCount = max(run.GPUCount, 1)
+	}
+	node.Labels = jsonValue(map[string]any{
+		"provider": "CLEARML", "queue": run.Queue,
+		"externalTaskId": task.ID, "runtime": "clearml-agent",
+	})
+	if node.ID == 0 {
+		_ = db.Create(&node).Error
+	} else {
+		_ = db.Save(&node).Error
 	}
 }
 

@@ -57,7 +57,12 @@
             <article v-for="queue in resources.queues" :key="queue.id" class="compact-card"
               ><div
                 ><b>{{ queue.name }}</b
-                ><span>{{ queue.provider }} / {{ queue.externalQueue }}</span></div
+                ><span>{{ queue.provider }} / {{ queue.externalQueue }}</span
+                ><span class="queue-metrics"
+                  >等待 {{ queue.queuedJobs }} · 运行 {{ queue.runningJobs }} · 已完成
+                  {{ queue.completedJobs }} · 平均等待
+                  {{ Number(queue.averageWaitSeconds || 0).toFixed(1) }}s</span
+                ></div
               ><el-tag :type="queue.enabled ? 'success' : 'info'">{{
                 queue.enabled ? 'ENABLED' : 'DISABLED'
               }}</el-tag></article

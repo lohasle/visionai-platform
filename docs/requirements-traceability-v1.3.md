@@ -20,7 +20,7 @@
 | FR-WB-003 | 我的待办 | AUDIT_PENDING | 待核对跨标注、审批、失败任务、告警去重 |
 | FR-WB-004 | 最近任务 | AUDIT_PENDING | 已有 Job 列表，待核对阶段、耗时和可读错误 |
 | FR-WB-005 | 资源概览 | PARTIAL | 有资源摘要；真实 GPU/CPU/内存/存储趋势待验收 |
-| FR-WB-006 | 服务健康 | PARTIAL | CVAT/FiftyOne/MinIO/DB 已部署；默认 Compose 缺 ClearML Server |
+| FR-WB-006 | 服务健康 | VERIFIED | 默认 Compose 的 ClearML/CVAT/FiftyOne/MinIO/DB 均健康；资源中心显示 2 个外部实例 HEALTHY |
 | FR-WB-007 | 活动日志 | AUDIT_PENDING | 已有审计/活动数据，待核对噪声过滤 |
 
 ## 项目（表 39）
@@ -43,7 +43,7 @@
 | FR-DATA-003 | 元数据提取 | PARTIAL | 图片基础元数据存在；视频编码、设备、业务场景待核对 |
 | FR-DATA-004 | 哈希与去重 | PARTIAL | SHA-256 精确去重存在；FiftyOne 近似重复待实测 |
 | FR-DATA-005 | 质量检查 | AUDIT_PENDING | 有质量状态和筛选，待覆盖全部错误类型 |
-| FR-DATA-006 | 标签与集合 | VERIFIED | 业务/场景/来源字典、批量打标、标签筛选、筛选保存 Collection |
+| FR-DATA-006 | 标签与集合 | VERIFIED | COCO128 的业务/场景/来源标签均实际应用到 128 张资产，并联合筛选冻结为 Collection #29 |
 | FR-DATA-007 | 引用关系 | AUDIT_PENDING | 有引用模型，待核对标注/数据集/反馈三类来源 |
 | FR-DATA-008 | 回收站删除 | AUDIT_PENDING | 有删除/恢复/清理 API，待冻结引用和保留期验收 |
 
@@ -102,7 +102,7 @@
 |---|---|---|---|
 | FR-TRN-001 | 创建训练 | VERIFIED | COCO128 冻结数据集 128 图/929 框真实训练通过（Run #13） |
 | FR-TRN-002 | 训练校验 | IMPLEMENTED | 冻结、模板、资源和配额检查存在 |
-| FR-TRN-003 | 提交 ClearML | PARTIAL | ClearML Adapter 存在；默认部署没有 ClearML Server/Agent |
+| FR-TRN-003 | 提交 ClearML | VERIFIED | ClearML Run #17 由 gpu-local Worker 在 RTX 3060 上完成真实训练、状态同步和制品回收 |
 | FR-TRN-004 | 状态同步 | IMPLEMENTED | 状态映射和 Orchestrator 存在 |
 | FR-TRN-005 | 日志与曲线 | VERIFIED | Run #13 归集 epoch/loss/GPU 秒/峰值显存和执行日志 |
 | FR-TRN-006 | 取消 | IMPLEMENTED | Provider 取消和最终状态对账逻辑存在 |
@@ -121,7 +121,7 @@
 | FR-LOCAL-005 | 输入协议 | VERIFIED | Manifest、AnnotationRevision、Ontology checksum、图片和真实框已确定性分发 |
 | FR-LOCAL-006 | 输出协议 | VERIFIED | result-manifest、权重、指标、环境锁和检测索引完成契约与 checksum 验证 |
 | FR-LOCAL-007 | 取消与清理 | AUDIT_PENDING | 容器取消存在；临时目录和缓存清理待验证 |
-| FR-LOCAL-008 | 三环境契约 | MISSING | 尚无 WSL2/Linux/ClearML 三方同模板契约证据 |
+| FR-LOCAL-008 | 三环境契约 | VERIFIED | LocalDocker Run #18 与 ClearML Run #17 共用 DatasetVersion #16、TemplateVersion #15、镜像和 result-manifest 合同 |
 
 ## 实验（表 60）
 
@@ -130,7 +130,7 @@
 | FR-EXP-001 | 列表筛选 | AUDIT_PENDING | 页面/API 存在，筛选维度待逐项核对 |
 | FR-EXP-002 | 指标摘要 | VERIFIED | 真实训练 loss/GPU/图像/标注统计和评估指标已落库 |
 | FR-EXP-003 | 实验对比 | IMPLEMENTED | 2–5 个运行比较 API/页面存在 |
-| FR-EXP-004 | 曲线 | PARTIAL | 曲线 UI 存在；ClearML 完整曲线链缺失 |
+| FR-EXP-004 | 曲线 | VERIFIED | VisionAI 指标库与 ClearML Scalars 同步显示 loss、GPU 峰值显存、GPU 秒和图像数 |
 | FR-EXP-005 | 克隆复现 | IMPLEMENTED | 克隆配置和差异字段存在 |
 | FR-EXP-006 | 候选模型 | VERIFIED | Run #13 的真实 PT 权重注册为 ModelVersion #10 |
 
@@ -213,7 +213,7 @@
 | 需求 | 功能 | 状态 | 当前证据或缺口 |
 |---|---|---|---|
 | FR-RES-001 | GPU 节点 | VERIFIED | 节点心跳与 Run #13 记录 RTX 3060、12GB、CUDA 12.6、驱动 591.86 |
-| FR-RES-002 | 队列 | PARTIAL | 队列模型存在；ClearML 等待/运行/平均等待缺真实服务 |
+| FR-RES-002 | 队列 | VERIFIED | 资源中心自动发现 ClearML CPU/GPU Worker，并显示等待、运行、完成数和真实平均等待 |
 | FR-RES-003 | 配额 | IMPLEMENTED | 租户/项目并发、GPU、时长、优先级字段存在 |
 | FR-RES-004 | 任务占用 | PARTIAL | 关联字段存在；真实 GPU 设备占用待采集 |
 | FR-RES-005 | 存储 | PARTIAL | MinIO 已部署；容量/对象/失败/生命周期全指标待验证 |

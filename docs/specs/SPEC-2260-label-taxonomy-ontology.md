@@ -64,5 +64,11 @@ Linear：LOH-23
 - COCO128 标注任务 #26 使用该版本创建 CVAT 标签，导出 Revision #14，共 929 个矩形框。
 - DatasetVersion #16 冻结并保存 OntologyVersion ID/checksum，训练 #13、评估 #18 和部署 #10 延续同一语义血缘。
 - 项目页面、资产批量标签、Collection、标注任务与数据集页面均改为使用受治理版本，不再接受自由文本类别作为事实源。
-- 浏览器证据：`docs/evidence/coco128-ontology-80.png`、`docs/evidence/coco128-cvat-embedded.png`。
+- COCO128 项目已建立“公开基准（业务）”“多场景（场景）”“Ultralytics COCO128（来源）”
+  三类受治理标签，分别实际应用到全部 128 张资产；三个标签联合筛选固化为已冻结
+  Collection #29，资产数 128。
+- 浏览器证据：`docs/evidence/coco128-ontology-80.png`、
+  `docs/evidence/coco128-cvat-embedded.png`、
+  `docs/evidence/coco128-governed-tag-dictionary.png`、
+  `docs/evidence/coco128-tag-filtered-frozen-collection.png`。
 - 机器可读验收报告：`docs/evidence/coco128-acceptance-20260727-113243.json`。

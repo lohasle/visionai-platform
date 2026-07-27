@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/config"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/httpx"
+	platformtraining "github.com/lohasle/nimbus-framework-go/internal/platform/training"
 	"gorm.io/gorm"
 )
 
@@ -25,6 +26,14 @@ type nodeHeartbeatRequest struct {
 	DriverVersion  string         `json:"driverVersion"`
 	CUDAVersion    string         `json:"cudaVersion"`
 	Labels         map[string]any `json:"labels"`
+}
+
+type computeQueueOverview struct {
+	ComputeQueue
+	QueuedJobs         int64   `json:"queuedJobs"`
+	RunningJobs        int64   `json:"runningJobs"`
+	AverageWaitSeconds float64 `json:"averageWaitSeconds"`
+	CompletedJobs      int64   `json:"completedJobs"`
 }
 
 func (h *Handler) ComputeNodeHeartbeat(c *gin.Context) {
@@ -57,10 +66,15 @@ func (h *Handler) ComputeNodeHeartbeat(c *gin.Context) {
 
 func (h *Handler) ResourceOverview(c *gin.Context) {
 	h.refreshLocalDockerGPU(c)
+	h.refreshClearMLWorkers(c)
 	var nodes []ComputeNode
 	var queues []ComputeQueue
 	h.db.Where("tenant_id = ?", tenantID(c)).Order("id").Find(&nodes)
 	h.db.Where("tenant_id = ?", tenantID(c)).Order("priority DESC,id").Find(&queues)
+	var trainingRuns []TrainingRun
+	h.db.Where("tenant_id = ?", tenantID(c)).
+		Order("id DESC").Limit(1000).Find(&trainingRuns)
+	queueRows := summarizeComputeQueues(queues, trainingRuns)
 	now := time.Now()
 	for i := range nodes {
 		if now.Sub(nodes[i].LastHeartbeatAt) > 2*time.Minute {
@@ -72,7 +86,82 @@ func (h *Handler) ResourceOverview(c *gin.Context) {
 	h.db.Model(&PlatformJob{}).Where("tenant_id = ? AND status IN ?", tenantID(c), []JobStatus{JobPending, JobQueued}).Count(&queuedJobs)
 	var storageBytes int64
 	h.db.Model(&Asset{}).Where("tenant_id = ? AND status <> ?", tenantID(c), AssetPurged).Select("COALESCE(SUM(size),0)").Scan(&storageBytes)
-	httpx.OK(c, gin.H{"nodes": nodes, "queues": queues, "activeJobs": activeJobs, "queuedJobs": queuedJobs, "storageBytes": storageBytes})
+	httpx.OK(c, gin.H{"nodes": nodes, "queues": queueRows, "activeJobs": activeJobs, "queuedJobs": queuedJobs, "storageBytes": storageBytes})
+}
+
+func (h *Handler) refreshClearMLWorkers(c *gin.Context) {
+	var recent int64
+	h.db.Model(&ComputeNode{}).
+		Where("tenant_id = ? AND node_key LIKE ? AND last_heartbeat_at > ?", tenantID(c), "clearml:%", time.Now().Add(-10*time.Second)).
+		Count(&recent)
+	if recent > 0 {
+		return
+	}
+	cfg := config.Load()
+	client, err := platformtraining.NewClearML(
+		cfg.ClearMLAPIURL, cfg.ClearMLWebURL,
+		cfg.ClearMLAccessKey, cfg.ClearMLSecretKey, 5*time.Second,
+	)
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+	workers, err := client.Workers(ctx)
+	if err != nil {
+		return
+	}
+	for _, worker := range workers {
+		heartbeat := worker.LastReport
+		if heartbeat.IsZero() {
+			heartbeat = time.Now()
+		}
+		var node ComputeNode
+		nodeKey := "clearml:" + worker.ID
+		h.db.Where("tenant_id = ? AND node_key = ?", tenantID(c), nodeKey).First(&node)
+		node.TenantID, node.NodeKey, node.Name = tenantID(c), nodeKey, worker.ID
+		node.Status, node.LastHeartbeatAt = "ONLINE", heartbeat
+		node.Labels = jsonValue(map[string]any{
+			"provider": "CLEARML", "queues": worker.Queues, "discovery": "workers.get_all",
+		})
+		if node.ID == 0 {
+			_ = h.db.Create(&node).Error
+		} else {
+			_ = h.db.Save(&node).Error
+		}
+	}
+}
+
+func summarizeComputeQueues(queues []ComputeQueue, runs []TrainingRun) []computeQueueOverview {
+	result := make([]computeQueueOverview, 0, len(queues))
+	for _, queue := range queues {
+		row := computeQueueOverview{ComputeQueue: queue}
+		var totalWait time.Duration
+		var started int64
+		for _, run := range runs {
+			if !strings.EqualFold(run.Provider, queue.Provider) ||
+				(run.Queue != queue.Name && run.Queue != queue.ExternalQueue) {
+				continue
+			}
+			switch run.Status {
+			case TrainingQueued, TrainingAllocating:
+				row.QueuedJobs++
+			case TrainingRunning, TrainingExporting:
+				row.RunningJobs++
+			case TrainingSucceeded:
+				row.CompletedJobs++
+			}
+			if run.StartedAt != nil && !run.CreatedAt.IsZero() && !run.StartedAt.Before(run.CreatedAt) {
+				totalWait += run.StartedAt.Sub(run.CreatedAt)
+				started++
+			}
+		}
+		if started > 0 {
+			row.AverageWaitSeconds = totalWait.Seconds() / float64(started)
+		}
+		result = append(result, row)
+	}
+	return result
 }
 
 func (h *Handler) refreshLocalDockerGPU(c *gin.Context) {
@@ -308,6 +397,11 @@ func integrationProbeTarget(row IntegrationInstance, cfg config.Config) string {
 			base = strings.TrimRight(cfg.FiftyOneAPIURL, "/")
 		}
 		return base + "/health"
+	case "CLEARML":
+		if strings.TrimSpace(cfg.ClearMLAPIURL) != "" {
+			base = strings.TrimRight(cfg.ClearMLAPIURL, "/")
+		}
+		return base + "/debug.ping"
 	default:
 		return base + "/health"
 	}

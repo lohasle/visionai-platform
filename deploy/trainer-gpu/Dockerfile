@@ -15,10 +15,10 @@ RUN python -m pip install --no-cache-dir pillow==11.3.0 \
     && python -c "from torchvision.models.detection import FasterRCNN_MobileNet_V3_Large_320_FPN_Weights as W; W.DEFAULT.get_state_dict(progress=True, check_hash=True)"
 
 RUN groupadd --gid 10001 trainer \
-    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin trainer
+    && useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin trainer
 
 COPY --chmod=0555 deploy/trainer-gpu/train.py /usr/local/bin/visionai-gpu-trainer
 RUN chmod -R a+rX /opt/torch-cache
 
 USER 10001:10001
-ENTRYPOINT ["python", "/usr/local/bin/visionai-gpu-trainer"]
+CMD ["python", "/usr/local/bin/visionai-gpu-trainer"]

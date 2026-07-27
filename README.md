@@ -22,6 +22,7 @@ Windows PowerShell 也可执行：
 - 账号：`admin / admin123`
 - Swagger：http://localhost:58080/swagger/index.html
 - CVAT：http://localhost:28080（`visionai / visionai_cvat_dev`）
+- ClearML：http://localhost:8080（`visionai / visionai_clearml_dev`）
 - FiftyOne：http://localhost:25151
 - MinIO Console：http://localhost:29001（`visionai / visionai_minio_dev`）
 - 推理 API：http://localhost:28000/docs
@@ -58,7 +59,7 @@ docker compose -f compose.yaml -f compose.gpu.yaml --profile inference-gpu --pro
 - 图片/视频资产、分片上传、批量导入、质量检测、集合冻结
 - CVAT 标注、预标注、复核、导出与不可变修订
 - 数据集 Manifest、训练/验证/测试拆分、校验、冻结和追溯
-- 训练模板、Smoke Test、LocalDocker/ClearML Provider、实验对比
+- 训练模板、Smoke Test、LocalDocker/ClearML Provider、CPU/GPU 队列与实验对比
 - FiftyOne 评估工作台、困难样本切片、基线回归门禁
 - 模型卡、制品哈希、供应链证据、四眼审批
 - 不可变部署修订、图片/视频推理、监控告警、回滚与重启

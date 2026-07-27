@@ -3,7 +3,14 @@ import request from '@/config/axios'
 export const getResourceOverview = () =>
   request.get<{
     nodes: Array<Record<string, any>>
-    queues: Array<Record<string, any>>
+    queues: Array<
+      Record<string, any> & {
+        queuedJobs: number
+        runningJobs: number
+        averageWaitSeconds: number
+        completedJobs: number
+      }
+    >
     activeJobs: number
     queuedJobs: number
     storageBytes: number
