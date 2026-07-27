@@ -20,7 +20,9 @@ export interface AnnotationTask {
   name: string
   taskType: string
   collectionId: number
+  ontologyVersionId: number
   ontologyVersion: string
+  ontologyChecksum: string
   status: AnnotationStatus
   progress: number
   externalBindingId: number
@@ -88,8 +90,7 @@ export const createAnnotationTask = (
     name: string
     taskType: string
     collectionId: number
-    ontologyVersion: string
-    labels: Array<{ name: string; color: string; type: string }>
+    ontologyVersionId: number
     annotatorIds: number[]
     reviewerIds: number[]
   }

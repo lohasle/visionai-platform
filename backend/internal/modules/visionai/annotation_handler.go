@@ -42,15 +42,16 @@ func transitionAnnotation(task *AnnotationTask, target AnnotationStatus) bool {
 }
 
 type annotationTaskRequest struct {
-	Name            string             `json:"name"`
-	TaskType        string             `json:"taskType"`
-	CollectionID    uint64             `json:"collectionId"`
-	OntologyVersion string             `json:"ontologyVersion"`
-	Labels          []annotation.Label `json:"labels"`
-	AnnotatorIDs    []uint64           `json:"annotatorIds"`
-	ReviewerIDs     []uint64           `json:"reviewerIds"`
-	PlanStartAt     *time.Time         `json:"planStartAt"`
-	PlanEndAt       *time.Time         `json:"planEndAt"`
+	Name              string             `json:"name"`
+	TaskType          string             `json:"taskType"`
+	CollectionID      uint64             `json:"collectionId"`
+	OntologyVersionID uint64             `json:"ontologyVersionId"`
+	OntologyVersion   string             `json:"ontologyVersion"`
+	Labels            []annotation.Label `json:"labels"`
+	AnnotatorIDs      []uint64           `json:"annotatorIds"`
+	ReviewerIDs       []uint64           `json:"reviewerIds"`
+	PlanStartAt       *time.Time         `json:"planStartAt"`
+	PlanEndAt         *time.Time         `json:"planEndAt"`
 }
 
 type annotationDecisionRequest struct {
@@ -176,8 +177,8 @@ func (h *Handler) AnnotationTaskCreate(c *gin.Context) {
 	}
 	var req annotationTaskRequest
 	if c.ShouldBindJSON(&req) != nil || strings.TrimSpace(req.Name) == "" || req.CollectionID == 0 ||
-		len(req.Labels) == 0 || len(req.AnnotatorIDs) == 0 || len(req.ReviewerIDs) == 0 {
-		httpx.Fail(c, 400, 400, "名称、资产集合、类别、标注员和审核员必填")
+		req.OntologyVersionID == 0 || len(req.AnnotatorIDs) == 0 || len(req.ReviewerIDs) == 0 {
+		httpx.Fail(c, 400, 400, "名称、资产集合、已发布类别体系版本、标注员和审核员必填")
 		return
 	}
 	var collection AssetCollection
@@ -202,14 +203,17 @@ func (h *Handler) AnnotationTaskCreate(c *gin.Context) {
 	if taskType == "" {
 		taskType = "CV_DETECTION"
 	}
+	ontologyVersion, ontologyLabels, ontologyErr := loadPublishedOntologyVersion(h.db, project, req.OntologyVersionID, taskType)
+	if ontologyErr != nil {
+		httpx.Fail(c, 409, 409, ontologyErr.Error())
+		return
+	}
 	row := AnnotationTask{
 		TenantID: project.TenantID, ProjectID: project.ID, Name: strings.TrimSpace(req.Name),
-		TaskType: taskType, CollectionID: req.CollectionID, OntologyVersion: strings.TrimSpace(req.OntologyVersion),
-		Labels: jsonValue(req.Labels), AnnotatorIDs: jsonValue(req.AnnotatorIDs), ReviewerIDs: jsonValue(req.ReviewerIDs),
+		TaskType: taskType, CollectionID: req.CollectionID, OntologyVersionID: ontologyVersion.ID,
+		OntologyVersion: ontologyVersion.SemanticVersion, OntologyChecksum: ontologyVersion.Checksum,
+		Labels: jsonValue(ontologyLabels), AnnotatorIDs: jsonValue(req.AnnotatorIDs), ReviewerIDs: jsonValue(req.ReviewerIDs),
 		Status: AnnotationDraft, PlanStartAt: req.PlanStartAt, PlanEndAt: req.PlanEndAt, CreatedBy: c.GetUint64("user_id"),
-	}
-	if row.OntologyVersion == "" {
-		row.OntologyVersion = "v1"
 	}
 	if err := h.db.Create(&row).Error; err != nil {
 		httpx.Fail(c, 500, 500, "标注任务创建失败")
@@ -514,7 +518,7 @@ func (h *Handler) AnnotationWorkbench(c *gin.Context) {
 			}
 		}
 	}
-	launchURL, err := h.createWorkbenchLaunch("CVAT", project, userID, "ANNOTATION_TASK", task.ID, target)
+	launchURL, err := h.createWorkbenchLaunch(c, "CVAT", project, userID, "ANNOTATION_TASK", task.ID, target)
 	if err != nil {
 		workbenchLaunchError(c, "CVAT 工作台授权失败："+err.Error())
 		return

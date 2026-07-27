@@ -1,8 +1,8 @@
-FROM python:3.11-slim-bookworm
+FROM pytorch/pytorch:2.7.1-cuda12.6-cudnn9-runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 COPY deploy/inference/requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN python -m pip install --no-cache-dir -r /app/requirements.txt
 COPY deploy/inference/app.py /app/app.py
 WORKDIR /app
 EXPOSE 8000

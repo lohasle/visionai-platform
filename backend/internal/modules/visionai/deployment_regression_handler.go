@@ -50,11 +50,7 @@ func validateRegressionImage(input []byte) (format string, width, height int, sh
 	return format, cfg.Width, cfg.Height, hex.EncodeToString(sum[:]), nil
 }
 
-func evaluateRegression(detections []struct {
-	Label      string    `json:"label"`
-	Confidence float64   `json:"confidence"`
-	BBox       []float64 `json:"bbox"`
-}, expectedLabel string, minimumConfidence float64) regressionResult {
+func evaluateRegression(detections []platforminference.Detection, expectedLabel string, minimumConfidence float64) regressionResult {
 	expectedLabel = strings.TrimSpace(expectedLabel)
 	result := regressionResult{
 		Status: "NOT_ASSERTED", ExpectedLabel: expectedLabel,

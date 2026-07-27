@@ -1061,6 +1061,18 @@ paths:
       summary: Summarize project asset quality states
       tags:
       - VisionAI Asset
+  /ai-platform/projects/{id}/assets/tags:
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Add, replace, or remove governed tags on assets
+      tags:
+      - VisionAI Asset Tag
   /ai-platform/projects/{id}/clone:
     post:
       responses:
@@ -1231,6 +1243,113 @@ paths:
       summary: Upload an image and run an online regression test
       tags:
       - VisionAI Deployment
+  /ai-platform/projects/{id}/ontologies:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: List project ontologies
+      tags:
+      - VisionAI Ontology
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Create an ontology and its first draft
+      tags:
+      - VisionAI Ontology
+  /ai-platform/projects/{id}/ontologies/{ontologyId}:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Get an ontology and all versions
+      tags:
+      - VisionAI Ontology
+  /ai-platform/projects/{id}/ontologies/{ontologyId}/versions:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Create an editable ontology draft
+      tags:
+      - VisionAI Ontology
+  /ai-platform/projects/{id}/ontology-versions:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: List selectable ontology versions
+      tags:
+      - VisionAI Ontology
+  /ai-platform/projects/{id}/ontology-versions/{versionId}:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Get ontology version labels and attributes
+      tags:
+      - VisionAI Ontology
+  /ai-platform/projects/{id}/ontology-versions/{versionId}/deprecate:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Deprecate an ontology version for new work
+      tags:
+      - VisionAI Ontology
+  /ai-platform/projects/{id}/ontology-versions/{versionId}/labels:
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Replace all labels in a draft ontology version
+      tags:
+      - VisionAI Ontology
+  /ai-platform/projects/{id}/ontology-versions/{versionId}/publish:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Publish and lock an ontology version
+      tags:
+      - VisionAI Ontology
   /ai-platform/projects/{id}/status:
     put:
       responses:
@@ -1243,6 +1362,41 @@ paths:
       summary: Activate or suspend a project
       tags:
       - VisionAI Project
+  /ai-platform/projects/{id}/tag-definitions:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: List governed asset tag definitions
+      tags:
+      - VisionAI Asset Tag
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Create a governed asset tag definition
+      tags:
+      - VisionAI Asset Tag
+  /ai-platform/projects/{id}/tag-definitions/{definitionId}:
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Update an asset tag definition
+      tags:
+      - VisionAI Asset Tag
   /ai-platform/projects/{id}/training-runs:
     get:
       responses: {}

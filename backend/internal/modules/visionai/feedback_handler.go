@@ -300,10 +300,27 @@ func (h *Handler) FeedbackBatchReview(c *gin.Context) {
 		Description: "来源 FeedbackBatch #" + strconv.FormatUint(batch.ID, 10), Filter: jsonValue(gin.H{"feedbackBatchId": batch.ID}),
 		Frozen: true, Version: 1, CreatedBy: c.GetUint64("user_id"),
 	}
+	var deploymentRevision DeploymentRevision
+	var modelVersion ModelVersion
+	var datasetVersion DatasetVersion
+	var ontologyVersion OntologyVersion
+	if h.db.Where("tenant_id = ? AND project_id = ? AND id = ?", project.TenantID, project.ID, samples[0].DeploymentRevisionID).First(&deploymentRevision).Error != nil ||
+		h.db.Where("tenant_id = ? AND project_id = ? AND id = ?", project.TenantID, project.ID, deploymentRevision.ModelVersionID).First(&modelVersion).Error != nil ||
+		h.db.Where("tenant_id = ? AND project_id = ? AND id = ?", project.TenantID, project.ID, modelVersion.DatasetVersionID).First(&datasetVersion).Error != nil ||
+		h.db.Where("tenant_id = ? AND project_id = ? AND id = ?", project.TenantID, project.ID, datasetVersion.OntologyVersionID).First(&ontologyVersion).Error != nil {
+		httpx.Fail(c, 409, 409, "无法从部署血缘解析类别体系版本")
+		return
+	}
+	ontologyLabels, ontologyErr := annotationLabelsForOntologyVersion(h.db, ontologyVersion)
+	if ontologyErr != nil {
+		httpx.Fail(c, 409, 409, ontologyErr.Error())
+		return
+	}
 	task := AnnotationTask{
 		TenantID: project.TenantID, ProjectID: project.ID, Name: "反馈返标-" + batch.Name,
-		TaskType: "DETECTION", OntologyVersion: "feedback-v1",
-		Labels:       jsonValue([]gin.H{{"name": "defect", "color": "#ef4444"}}),
+		TaskType: "CV_DETECTION", OntologyVersionID: ontologyVersion.ID,
+		OntologyVersion: ontologyVersion.SemanticVersion, OntologyChecksum: ontologyVersion.Checksum,
+		Labels:       jsonValue(ontologyLabels),
 		AnnotatorIDs: jsonValue([]uint64{project.OwnerUserID}),
 		ReviewerIDs:  jsonValue([]uint64{c.GetUint64("user_id")}),
 		Status:       AnnotationPreparing, CreatedBy: c.GetUint64("user_id"),

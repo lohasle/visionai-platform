@@ -476,12 +476,12 @@ const submitVersion = async () => {
         ...versionForm,
         outputProtocol: 'visionai.result-manifest.v1',
         parameterSchema: { type: 'object', additionalProperties: true },
-        resourceRequirements: { cpu: 1, memoryBytes: 536870912, gpuMax: 8 },
+        resourceRequirements: { cpu: 2, memoryBytes: 4294967296, gpuMin: 1, gpuMax: 1 },
         compatibility: { taskTypes: ['CV_DETECTION'] },
         licensePolicy: { allowed: true }
       }
     )
-    message.info('正在运行隔离的 CPU 最小训练冒烟…')
+    message.info('正在使用本机 GPU 运行隔离的目标检测最小训练冒烟…')
     await smokeTrainingTemplateVersion(projectId.value, version.id)
     await publishTrainingTemplateVersion(projectId.value, version.id)
     versionVisible.value = false
@@ -510,7 +510,7 @@ const submitRun = async () => {
     await createTrainingRun(projectId.value, {
       ...runForm,
       priority: 50,
-      parameters: {},
+      parameters: { epochs: 3, batchSize: 2, learningRate: 0.005, pretrained: true },
       runtimeSpec: { cpus: 2, memoryBytes: 4294967296 },
       codeCommit: 'local-acceptance'
     })

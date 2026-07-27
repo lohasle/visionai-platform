@@ -17,9 +17,19 @@ import (
 )
 
 type Label struct {
-	Name  string `json:"name"`
-	Color string `json:"color,omitempty"`
-	Type  string `json:"type,omitempty"`
+	ID         int64       `json:"id,omitempty"`
+	Name       string      `json:"name"`
+	Color      string      `json:"color,omitempty"`
+	Type       string      `json:"type,omitempty"`
+	Attributes []Attribute `json:"attributes,omitempty"`
+}
+
+type Attribute struct {
+	Name         string   `json:"name"`
+	InputType    string   `json:"input_type"`
+	Values       []string `json:"values"`
+	DefaultValue string   `json:"default_value,omitempty"`
+	Mutable      bool     `json:"mutable"`
 }
 
 type Media struct {
@@ -58,6 +68,7 @@ type Provider interface {
 	CreateTask(context.Context, string, []Label, int) (Task, error)
 	AttachData(context.Context, int64, []Media) error
 	GetTask(context.Context, int64) (Task, error)
+	GetTaskLabels(context.Context, int64) ([]Label, error)
 	GetAnnotations(context.Context, int64) ([]byte, error)
 	PutAnnotations(context.Context, int64, []byte) error
 	TaskURL(int64) string
@@ -171,6 +182,24 @@ func (c *CVAT) GetTask(ctx context.Context, taskID int64) (Task, error) {
 	var task Task
 	err = json.NewDecoder(resp.Body).Decode(&task)
 	return task, err
+}
+
+func (c *CVAT) GetTaskLabels(ctx context.Context, taskID int64) ([]Label, error) {
+	resp, err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api/labels?task_id=%d&page_size=1000", taskID), "", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var page struct {
+		Results []Label `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		return nil, err
+	}
+	if len(page.Results) == 0 {
+		return nil, errors.New("CVAT task has no labels")
+	}
+	return page.Results, nil
 }
 
 func (c *CVAT) GetAnnotations(ctx context.Context, taskID int64) ([]byte, error) {

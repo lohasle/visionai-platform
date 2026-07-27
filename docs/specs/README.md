@@ -22,5 +22,10 @@
 | [SPEC-2230](SPEC-2230-rtx3060-gpu-e2e-reliability.md) | RTX 3060 GPU 全链路可靠性修复 | 已完成（Linear LOH-20） |
 | [SPEC-2240](SPEC-2240-system-role-project-authorization.md) | 统一复用系统角色管理与项目授权 | 已完成（Linear LOH-21） |
 | [SPEC-2250](SPEC-2250-asset-collections-lan-workbench.md) | 资产集合工作流与局域网工作台访问 | 已完成（Linear LOH-22） |
+| [SPEC-2260](SPEC-2260-label-taxonomy-ontology.md) | 标签分类与版本化类别体系治理 | 已完成（Linear LOH-23） |
+| [SPEC-2270](SPEC-2270-real-gpu-detection-e2e.md) | RTX 3060 真实目标检测训练、评估、部署闭环 | 已完成（Linear LOH-24） |
+| [SPEC-2280](SPEC-2280-clearml-three-environment-contract.md) | ClearML 默认部署与三环境训练契约 | 进行中（Linear LOH-25） |
+| [SPEC-2290](SPEC-2290-template-supply-chain-integration-upgrade.md) | 项目模板、供应链审批与集成升级回退 | 进行中（Linear LOH-26） |
+| [SPEC-2300](SPEC-2300-full-fr-observability-feedback-benefit.md) | 全量 FR 验收、可观测性与反馈收益闭环 | 进行中（Linear LOH-27） |
 
 SPEC 状态必须以自动化测试和实际运行验收为依据。

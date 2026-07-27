@@ -22,6 +22,21 @@ type Revision struct {
 	Config         map[string]any `json:"config"`
 }
 
+type EvaluationModel struct {
+	TrainingRunID  uint64 `json:"trainingRunId"`
+	ArtifactURI    string `json:"artifactUri"`
+	ArtifactSHA256 string `json:"artifactSha256"`
+}
+
+type Detection struct {
+	Label      string    `json:"label"`
+	LabelCode  string    `json:"labelCode"`
+	ClassIndex int       `json:"classIndex"`
+	Confidence float64   `json:"confidence"`
+	BBox       []float64 `json:"bbox"`
+	BBoxFormat string    `json:"bboxFormat"`
+}
+
 type Prediction struct {
 	ModelVersionID uint64 `json:"modelVersionId"`
 	RevisionID     uint64 `json:"revisionId"`
@@ -30,13 +45,9 @@ type Prediction struct {
 		Height int    `json:"height"`
 		SHA256 string `json:"sha256"`
 	} `json:"image"`
-	Detections []struct {
-		Label      string    `json:"label"`
-		Confidence float64   `json:"confidence"`
-		BBox       []float64 `json:"bbox"`
-	} `json:"detections"`
-	LatencyMS float64 `json:"latencyMs"`
-	Engine    string  `json:"engine"`
+	Detections []Detection `json:"detections"`
+	LatencyMS  float64     `json:"latencyMs"`
+	Engine     string      `json:"engine"`
 }
 
 type VideoPrediction struct {
@@ -93,7 +104,36 @@ func (c *Client) Stop(ctx context.Context, revisionID uint64) error {
 	return nil
 }
 
+func (c *Client) LoadEvaluation(ctx context.Context, evaluationRunID uint64, model EvaluationModel) error {
+	body, _ := json.Marshal(model)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+"/admin/evaluations/"+strconv.FormatUint(evaluationRunID, 10), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	response, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		message, _ := io.ReadAll(io.LimitReader(response.Body, 16<<10))
+		return fmt.Errorf("load evaluation model: HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(message)))
+	}
+	return nil
+}
+
+func (c *Client) PredictEvaluation(ctx context.Context, evaluationRunID, trainingRunID uint64, artifactSHA256, filename string, input io.Reader) (Prediction, error) {
+	endpoint := c.baseURL + "/v1/evaluations/" + strconv.FormatUint(evaluationRunID, 10) + "/predict?" +
+		"training_run_id=" + strconv.FormatUint(trainingRunID, 10) + "&artifact_sha256=" + artifactSHA256
+	return c.predict(ctx, endpoint, filename, input)
+}
+
 func (c *Client) Predict(ctx context.Context, filename string, input io.Reader) (Prediction, error) {
+	return c.predict(ctx, c.baseURL+"/v1/predict", filename, input)
+}
+
+func (c *Client) predict(ctx context.Context, endpoint, filename string, input io.Reader) (Prediction, error) {
 	var result Prediction
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -105,7 +145,7 @@ func (c *Client) Predict(ctx context.Context, filename string, input io.Reader) 
 		return result, err
 	}
 	_ = writer.Close()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/predict", &body)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	response, err := c.http.Do(req)
 	if err != nil {

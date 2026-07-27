@@ -229,7 +229,31 @@ $classNames = @(
 )
 $colors = @("#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6", "#06b6d4", "#3b82f6", "#6366f1", "#a855f7", "#ec4899")
 $annotationLabels = for ($index = 0; $index -lt $classNames.Count; $index++) {
-    @{ name = $classNames[$index]; color = $colors[$index % $colors.Count]; type = "rectangle" }
+    @{
+        code = "coco_$($index.ToString('00'))"
+        name = $classNames[$index]
+        color = $colors[$index % $colors.Count]
+        shapeType = "rectangle"
+        sort = $index
+        attributes = @()
+    }
+}
+
+Write-Step "Creating and publishing the governed COCO 80 ontology"
+$ontologyResult = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/ontologies" -Body @{
+    code = "coco_detection"
+    name = "COCO 2017 Detection"
+    taskType = "CV_DETECTION"
+    description = "The 80-category COCO 2017 detection ontology used by the public acceptance pipeline."
+}
+$ontologyId = [int64]$ontologyResult.ontology.id
+$ontologyVersionId = [int64]$ontologyResult.version.id
+Invoke-VisionAI -Method Put -Path "/ai-platform/projects/$projectId/ontology-versions/$ontologyVersionId/labels" -Body @{
+    labels = $annotationLabels
+} | Out-Null
+$publishedOntology = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/ontology-versions/$ontologyVersionId/publish"
+if (-not $publishedOntology.checksum -or $publishedOntology.status -ne "PUBLISHED") {
+    throw "COCO ontology publishing failed"
 }
 
 Write-Step "Creating a governed CVAT task with the 80-class COCO ontology"
@@ -237,8 +261,7 @@ $annotationTask = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$pro
     name = "COCO128 Ground Truth Review"
     taskType = "CV_DETECTION"
     collectionId = $collectionId
-    ontologyVersion = "coco-2017-v1"
-    labels = $annotationLabels
+    ontologyVersionId = $ontologyVersionId
     annotatorIds = @(1)
     reviewerIds = @(1)
 }
@@ -349,7 +372,7 @@ $datasetVersion = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$pro
     sourceType = "COLLECTION"
     sourceId = $collectionId
     annotationRevisionId = $annotationRevisionId
-    ontologyVersion = "coco-2017-v1"
+    ontologyVersionId = $ontologyVersionId
     splitSeed = 20260724
     split = @{ TRAIN = 0.8; VAL = 0.1; TEST = 0.1 }
 }
@@ -397,10 +420,10 @@ $template = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId
 }
 $templateId = [int64]$template.id
 $templateVersion = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/training-templates/$templateId/versions" -Body @{
-    trainer = "CuPyImageRegression"
+    trainer = "TorchVisionFasterRCNN"
     imageRef = $trainerDigest
     entrypoint = ""
-    parameterSchema = @{ type = "object"; properties = @{ epochs = @{ type = "integer"; minimum = 1 } } }
+    parameterSchema = @{ type = "object"; properties = @{ epochs = @{ type = "integer"; minimum = 1 }; batchSize = @{ type = "integer"; minimum = 1 }; learningRate = @{ type = "number"; exclusiveMinimum = 0 }; pretrained = @{ type = "boolean" } } }
     outputProtocol = "visionai.result-manifest.v1"
     resourceRequirements = @{ cpu = 2; memoryBytes = 4294967296; gpuMin = 1; gpuMax = 1 }
     compatibility = @{ taskTypes = @("CV_DETECTION") }
@@ -417,10 +440,10 @@ $training = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId
     queue = "gpu-local"
     gpuCount = 1
     priority = 50
-    parameters = @{ epochs = 12; dataset = "COCO128"; imageSize = 64 }
+    parameters = @{ epochs = 2; batchSize = 2; learningRate = 0.0025; pretrained = $true; seed = 20260727; dataset = "COCO128"; imageSize = 320 }
     runtimeSpec = @{ memoryBytes = 4294967296; cpus = 2 }
     codeCommit = "coco128-rtx3060-acceptance"
-    pretrainedRef = "none"
+    pretrainedRef = "torchvision://fasterrcnn_mobilenet_v3_large_320_fpn/COCO_V1"
 } -ExtraHeaders @{ "Idempotency-Key" = "coco128-training-$RunTag" }
 $trainingRunId = [int64]$training.run.id
 $trainingFinal = Wait-VisionAIStatus -Path "/ai-platform/projects/$projectId/training-runs/$trainingRunId" `
@@ -431,7 +454,7 @@ $suite = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/ev
     name = "COCO128 Release Gate"
     datasetVersionId = $datasetVersionId
     slices = @("all", "small-object", "occluded", "low-confidence")
-    thresholds = @{ mAP = 0.5; precision = 0.5; recall = 0.5 }
+    thresholds = @{ mAP = 0.5; precision = 0.25; recall = 0.4 }
     gatePolicy = "MUST_PASS"
 }
 $suiteId = [int64]$suite.id

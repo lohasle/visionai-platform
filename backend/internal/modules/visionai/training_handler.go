@@ -1,20 +1,16 @@
 package visionai
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/lohasle/nimbus-framework-go/internal/platform/config"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/httpx"
-	platformtraining "github.com/lohasle/nimbus-framework-go/internal/platform/training"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -187,32 +183,73 @@ func (h *Handler) TrainingTemplateSmoke(c *gin.Context) {
 		httpx.Fail(c, 409, 409, "模板版本不存在或已发布")
 		return
 	}
-	cfg := config.Load()
-	var requirements struct {
-		GPUMin int `json:"gpuMin"`
+	if version.SmokeStatus != "RUNNING" {
+		job := PlatformJob{
+			TenantID: project.TenantID, ProjectID: project.ID, JobType: "TRAINING_TEMPLATE_SMOKE",
+			ResourceType: "TRAINING_TEMPLATE_VERSION", ResourceID: version.ID,
+			Status: JobQueued, Stage: "QUEUED", TraceID: uuid.NewString(),
+			Idempotency: fmt.Sprintf("training-template-smoke:%d:%s", version.ID, uuid.NewString()),
+			MaxRetries:  1, CreatedBy: c.GetUint64("user_id"),
+		}
+		err := h.db.Transaction(func(tx *gorm.DB) error {
+			var locked TrainingTemplateVersion
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("tenant_id = ? AND project_id = ? AND id = ? AND published = ?", project.TenantID, project.ID, version.ID, false).
+				First(&locked).Error; err != nil {
+				return err
+			}
+			if locked.SmokeStatus == "RUNNING" {
+				return nil
+			}
+			if err := tx.Create(&job).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&locked).Updates(map[string]any{
+				"smoke_status": "RUNNING",
+				"smoke_report": jsonValue(gin.H{"jobId": job.ID, "stage": "QUEUED"}),
+			}).Error; err != nil {
+				return err
+			}
+			return tx.Create(&OutboxEvent{
+				TenantID: project.TenantID, EventID: uuid.NewString(),
+				EventType:     "training.template.smoke.requested.v1",
+				AggregateType: "TRAINING_TEMPLATE_VERSION", AggregateID: version.ID,
+				Payload: jsonValue(gin.H{"templateVersionId": version.ID, "jobId": job.ID}),
+				Status:  outboxNew,
+			}).Error
+		})
+		if err != nil {
+			httpx.Fail(c, 409, 409, "模板冒烟任务创建失败")
+			return
+		}
 	}
-	_ = json.Unmarshal([]byte(version.ResourceRequirements), &requirements)
-	runID := uint64(time.Now().UnixNano())
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Minute)
-	defer cancel()
-	manifest, log, err := (platformtraining.LocalDocker{
-		Binary:      cfg.DockerBinary,
-		VolumesFrom: cfg.DockerVolumesFrom,
-	}).Run(ctx, platformtraining.LocalDockerSpec{
-		RunID: runID, ImageRef: version.ImageRef, Entrypoint: version.Entrypoint,
-		OutputDir:          filepath.Join(cfg.TrainingWorkRoot, "template-smoke", strconv.FormatUint(version.ID, 10)),
-		DatasetManifestURI: "s3://visionai-assets/smoke/dataset-manifest.json", ParametersJSON: "{}",
-		MemoryBytes: 512 << 20, CPUs: 1, GPUCount: requirements.GPUMin,
-	})
-	if err != nil {
-		version.SmokeStatus, version.SmokeReport = "FAILED", jsonValue(gin.H{"error": err.Error(), "log": string(log)})
-		h.db.Save(&version)
-		httpx.Fail(c, 422, 422, "模板冒烟测试失败")
-		return
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(10 * time.Minute)
+	defer timeout.Stop()
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case <-timeout.C:
+			httpx.Fail(c, http.StatusGatewayTimeout, http.StatusGatewayTimeout, "模板冒烟仍在 Runner 执行，请稍后刷新")
+			return
+		case <-ticker.C:
+			if err := h.db.Where("tenant_id = ? AND project_id = ? AND id = ?", project.TenantID, project.ID, version.ID).First(&version).Error; err != nil {
+				httpx.Fail(c, 404, 404, "模板版本不存在")
+				return
+			}
+			switch version.SmokeStatus {
+			case "PASSED":
+				httpx.OK(c, version)
+				return
+			case "FAILED":
+				httpx.Fail(c, 422, 422, "模板冒烟测试失败")
+				return
+			}
+		}
 	}
-	version.SmokeStatus, version.SmokeReport = "PASSED", jsonValue(gin.H{"summary": manifest.Summary, "log": string(log)})
-	h.db.Save(&version)
-	httpx.OK(c, version)
 }
 
 // TrainingTemplatePublish godoc

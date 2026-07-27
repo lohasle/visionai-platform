@@ -218,6 +218,10 @@ func exportAnnotationRevision(ctx context.Context, db *gorm.DB, provider annotat
 	}
 	sum := sha256.Sum256(raw)
 	checksum := hex.EncodeToString(sum[:])
+	categoryMapping, err := provider.GetTaskLabels(ctx, externalID)
+	if err != nil {
+		return fmt.Errorf("download CVAT category mapping: %w", err)
+	}
 	var latest AnnotationRevision
 	revisionNo := 1
 	if db.Where("tenant_id = ? AND annotation_task_id = ?", task.TenantID, task.ID).Order("revision_no DESC").First(&latest).Error == nil {
@@ -234,7 +238,8 @@ func exportAnnotationRevision(ctx context.Context, db *gorm.DB, provider annotat
 	revision := AnnotationRevision{
 		TenantID: task.TenantID, ProjectID: task.ProjectID, AnnotationTaskID: task.ID, RevisionNo: revisionNo,
 		SnapshotURI: objectStore.URI(objectKey), ObjectKey: objectKey, Format: "CVAT_JSON",
-		Checksum: checksum, CategoryMapping: task.Labels, AnnotationCount: countAnnotations(raw), ApprovedBy: task.CreatedBy,
+		Checksum: checksum, CategoryMapping: jsonValue(categoryMapping), OntologyVersionID: task.OntologyVersionID,
+		OntologyChecksum: task.OntologyChecksum, AnnotationCount: countAnnotations(raw), ApprovedBy: task.CreatedBy,
 	}
 	now := time.Now()
 	return db.Transaction(func(tx *gorm.DB) error {

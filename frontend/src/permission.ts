@@ -1,7 +1,8 @@
 import router from './router'
 import type { RouteRecordRaw } from 'vue-router'
 import { isRelogin } from '@/config/axios/service'
-import { getAccessToken } from '@/utils/auth'
+import { getAccessToken, removeToken } from '@/utils/auth'
+import { deleteUserCache } from '@/hooks/web/useCache'
 import { useTitle } from '@/hooks/web/useTitle'
 import { useNProgress } from '@/hooks/web/useNProgress'
 import { usePageLoading } from '@/hooks/web/usePageLoading'
@@ -42,21 +43,30 @@ router.beforeEach(async (to, from, next) => {
       }
       if (!userStore.getIsSetUser) {
         isRelogin.show = true
-        await userStore.setUserInfoAction()
-        isRelogin.show = false
-        // 后端过滤菜单
-        await permissionStore.generateRoutes()
-        permissionStore.getAddRouters.forEach((route) => {
-          router.addRoute(route as unknown as RouteRecordRaw) // 动态添加可访问路由表
-        })
-        const redirectPath = from.query.redirect
-        // 修复跳转时不带参数的问题
-        const redirect = typeof redirectPath === 'string' ? redirectPath : to.fullPath
-        const redirectLocation = parseRouteLocation(redirect)
-        // 首次访问动态路由时，to 可能已经匹配静态 404。不能继续展开 to，
-        // 否则会把 404 的 route name 带入下一次导航；应始终从原始 URL 重新解析。
-        const nextData = { ...redirectLocation, replace: true }
-        next(nextData)
+        try {
+          await userStore.setUserInfoAction()
+          // 后端过滤菜单
+          await permissionStore.generateRoutes()
+          permissionStore.getAddRouters.forEach((route) => {
+            router.addRoute(route as unknown as RouteRecordRaw) // 动态添加可访问路由表
+          })
+          const redirectPath = from.query.redirect
+          // 修复跳转时不带参数的问题
+          const redirect = typeof redirectPath === 'string' ? redirectPath : to.fullPath
+          const redirectLocation = parseRouteLocation(redirect)
+          // 首次访问动态路由时，to 可能已经匹配静态 404。不能继续展开 to，
+          // 否则会把 404 的 route name 带入下一次导航；应始终从原始 URL 重新解析。
+          const nextData = { ...redirectLocation, replace: true }
+          next(nextData)
+        } catch {
+          // 过期或已撤销的本地令牌不能把应用永久卡在启动页。
+          removeToken()
+          deleteUserCache()
+          userStore.resetState()
+          next(`/login?redirect=${encodeURIComponent(to.fullPath)}`)
+        } finally {
+          isRelogin.show = false
+        }
       } else {
         next()
       }

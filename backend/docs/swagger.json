@@ -557,6 +557,27 @@
                 }
             }
         },
+        "/ai-platform/projects/{id}/assets/tags": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset Tag"
+                ],
+                "summary": "Add, replace, or remove governed tags on assets",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/ai-platform/projects/{id}/assets/{assetId}": {
             "get": {
                 "security": [
@@ -952,6 +973,193 @@
                 }
             }
         },
+        "/ai-platform/projects/{id}/ontologies": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Ontology"
+                ],
+                "summary": "List project ontologies",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Ontology"
+                ],
+                "summary": "Create an ontology and its first draft",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/ontologies/{ontologyId}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Ontology"
+                ],
+                "summary": "Get an ontology and all versions",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/ontologies/{ontologyId}/versions": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Ontology"
+                ],
+                "summary": "Create an editable ontology draft",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/ontology-versions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Ontology"
+                ],
+                "summary": "List selectable ontology versions",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/ontology-versions/{versionId}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Ontology"
+                ],
+                "summary": "Get ontology version labels and attributes",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/ontology-versions/{versionId}/deprecate": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Ontology"
+                ],
+                "summary": "Deprecate an ontology version for new work",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/ontology-versions/{versionId}/labels": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Ontology"
+                ],
+                "summary": "Replace all labels in a draft ontology version",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/ontology-versions/{versionId}/publish": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Ontology"
+                ],
+                "summary": "Publish and lock an ontology version",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/ai-platform/projects/{id}/status": {
             "put": {
                 "security": [
@@ -963,6 +1171,67 @@
                     "VisionAI Project"
                 ],
                 "summary": "Activate or suspend a project",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/tag-definitions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset Tag"
+                ],
+                "summary": "List governed asset tag definitions",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset Tag"
+                ],
+                "summary": "Create a governed asset tag definition",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/ai-platform/projects/{id}/tag-definitions/{definitionId}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "VisionAI Asset Tag"
+                ],
+                "summary": "Update an asset tag definition",
                 "responses": {
                     "200": {
                         "description": "OK",

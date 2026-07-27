@@ -134,11 +134,28 @@
               ><el-option label="目标检测" value="CV_DETECTION"
             /></el-select>
           </el-form-item>
-          <el-form-item label="类别体系版本"
-            ><el-input v-model="form.ontologyVersion"
-          /></el-form-item>
+          <el-form-item label="类别体系版本" required>
+            <el-select
+              v-model="form.ontologyVersionId"
+              class="full-width"
+              placeholder="选择已发布版本"
+            >
+              <el-option
+                v-for="version in ontologyVersions"
+                :key="version.id"
+                :label="`${version.ontologyName} · ${version.semanticVersion} · ${version.labelCount} 类`"
+                :value="version.id"
+              />
+            </el-select>
+          </el-form-item>
         </div>
-        <el-form-item label="类别（逗号分隔）"><el-input v-model="form.labels" /></el-form-item>
+        <el-alert
+          v-if="!ontologyVersions.length"
+          :closable="false"
+          type="warning"
+          show-icon
+          title="当前项目没有已发布的目标检测类别版本，请先到“标签与类别”发布。"
+        />
         <div class="form-grid">
           <el-form-item label="标注员">
             <el-select
@@ -286,6 +303,10 @@ import {
   type ProjectMember
 } from '@/api/ai-platform/projects'
 import { getSimpleUserList, type UserVO } from '@/api/system/user'
+import {
+  getPublishedOntologyVersions,
+  type SelectableOntologyVersion
+} from '@/api/ai-platform/ontology'
 
 defineOptions({ name: 'VisionAIAnnotations' })
 const message = useMessage()
@@ -310,6 +331,7 @@ const collections = ref<AssetCollection[]>([])
 const mappings = ref<CVATUserMapping[]>([])
 const members = ref<ProjectMember[]>([])
 const users = ref<UserVO[]>([])
+const ontologyVersions = ref<SelectableOntologyVersion[]>([])
 const total = ref(0)
 const loading = ref(false)
 const saving = ref(false)
@@ -328,8 +350,7 @@ const form = reactive({
   name: '',
   taskType: 'CV_DETECTION',
   collectionId: undefined as number | undefined,
-  ontologyVersion: 'v1',
-  labels: 'defect',
+  ontologyVersionId: undefined as number | undefined,
   annotatorIds: [] as number[],
   reviewerIds: [] as number[]
 })
@@ -393,14 +414,17 @@ const loadTasks = async () => {
 }
 const loadAll = async () => {
   if (!projectId.value) return
-  const [, collectionRows, memberRows] = await Promise.all([
+  const [, collectionRows, memberRows, versionRows] = await Promise.all([
     loadTasks(),
     getAssetCollections(projectId.value),
-    getProjectMembers(projectId.value)
+    getProjectMembers(projectId.value),
+    getPublishedOntologyVersions(projectId.value)
   ])
   collections.value = collectionRows
   members.value = memberRows
+  ontologyVersions.value = versionRows
   form.collectionId = frozenCollections.value[0]?.id
+  form.ontologyVersionId = ontologyVersions.value[0]?.id
   form.annotatorIds = annotatorOptions.value.slice(0, 1).map((user) => user.id)
   form.reviewerIds = reviewerOptions.value.slice(0, 1).map((user) => user.id)
   mappingUserId.value = projectUsers.value[0]?.id
@@ -410,23 +434,19 @@ const submitCreate = async () => {
   if (
     !projectId.value ||
     !form.collectionId ||
+    !form.ontologyVersionId ||
     !form.name.trim() ||
     !form.annotatorIds.length ||
     !form.reviewerIds.length
   )
-    return message.warning('请填写任务名称，选择冻结集合、标注员和审核员')
+    return message.warning('请填写任务名称，选择冻结集合、已发布类别版本、标注员和审核员')
   saving.value = true
   try {
     await createAnnotationTask(projectId.value, {
       name: form.name,
       taskType: form.taskType,
       collectionId: form.collectionId,
-      ontologyVersion: form.ontologyVersion,
-      labels: form.labels.split(',').map((name, index) => ({
-        name: name.trim(),
-        type: 'rectangle',
-        color: ['#ff4d4f', '#1677ff', '#52c41a'][index % 3]
-      })),
+      ontologyVersionId: form.ontologyVersionId,
       annotatorIds: form.annotatorIds,
       reviewerIds: form.reviewerIds
     })

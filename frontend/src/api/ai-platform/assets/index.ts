@@ -16,6 +16,14 @@ export interface Asset {
   duplicateOfId: number
   errorCode: string
   errorMessage: string
+  tags: Array<{
+    id: number
+    definitionId: number
+    category: 'BUSINESS' | 'SCENE' | 'SOURCE'
+    tag: string
+    name: string
+    color: string
+  }>
   createTime: string
 }
 

@@ -16,6 +16,7 @@ func Migrate(db *gorm.DB) error {
 		&Asset{}, &UploadSession{}, &UploadChunk{}, &AssetReference{},
 		&AssetImportRun{},
 		&AssetCollection{}, &AssetCollectionItem{}, &AssetTag{},
+		&AssetTagDefinition{}, &Ontology{}, &OntologyVersion{}, &OntologyLabel{}, &OntologyAttribute{},
 		&AnnotationTask{}, &AnnotationRevision{}, &ExternalResourceBinding{},
 		&CVATUserMapping{}, &WorkbenchTicket{}, &PreannotationRun{},
 		&Dataset{}, &DatasetVersion{}, &DatasetVersionItem{},
@@ -31,6 +32,12 @@ func Migrate(db *gorm.DB) error {
 		return err
 	}
 	if err := system.EnsureVisionAIRoles(db); err != nil {
+		return err
+	}
+	if err := migrateLegacyOntologies(db); err != nil {
+		return err
+	}
+	if err := migrateLegacyAssetTags(db); err != nil {
 		return err
 	}
 	if err := migrateLegacyProjectRoles(db); err != nil {
@@ -91,6 +98,15 @@ func Register(group *gin.RouterGroup, db *gorm.DB, auth gin.HandlerFunc) {
 	api.PUT("/projects/:id/status", h.ProjectStatusUpdate)
 	api.POST("/projects/:id/archive", h.ProjectArchive)
 	api.POST("/projects/:id/clone", h.ProjectClone)
+	api.GET("/projects/:id/ontologies", h.OntologyPage)
+	api.POST("/projects/:id/ontologies", h.OntologyCreate)
+	api.GET("/projects/:id/ontologies/:ontologyId", h.OntologyGet)
+	api.POST("/projects/:id/ontologies/:ontologyId/versions", h.OntologyVersionCreate)
+	api.GET("/projects/:id/ontology-versions", h.OntologyVersionPage)
+	api.GET("/projects/:id/ontology-versions/:versionId", h.OntologyVersionGet)
+	api.PUT("/projects/:id/ontology-versions/:versionId/labels", h.OntologyLabelsReplace)
+	api.POST("/projects/:id/ontology-versions/:versionId/publish", h.OntologyVersionPublish)
+	api.POST("/projects/:id/ontology-versions/:versionId/deprecate", h.OntologyVersionDeprecate)
 	api.GET("/projects/:id/members", h.ProjectMemberList)
 	api.PUT("/projects/:id/members", h.ProjectMemberUpsert)
 	api.DELETE("/projects/:id/members/:userId", h.ProjectMemberDelete)
@@ -101,6 +117,7 @@ func Register(group *gin.RouterGroup, db *gorm.DB, auth gin.HandlerFunc) {
 	api.PUT("/projects/:id/uploads/:sessionId/chunks/:part", h.UploadChunkPut)
 	api.POST("/projects/:id/uploads/:sessionId/complete", h.UploadComplete)
 	api.GET("/projects/:id/assets", h.AssetPage)
+	api.PUT("/projects/:id/assets/tags", h.AssetTagsBatchUpdate)
 	api.GET("/projects/:id/assets/quality", h.AssetQuality)
 	api.GET("/projects/:id/assets/:assetId", h.AssetGet)
 	api.DELETE("/projects/:id/assets/:assetId", h.AssetDelete)
@@ -115,6 +132,9 @@ func Register(group *gin.RouterGroup, db *gorm.DB, auth gin.HandlerFunc) {
 	api.PUT("/projects/:id/collections/:collectionId/assets", h.CollectionAddAssets)
 	api.POST("/projects/:id/collections/:collectionId/freeze", h.CollectionFreeze)
 	api.PUT("/projects/:id/assets/:assetId/tags", h.AssetTagsUpdate)
+	api.GET("/projects/:id/tag-definitions", h.AssetTagDefinitionPage)
+	api.POST("/projects/:id/tag-definitions", h.AssetTagDefinitionCreate)
+	api.PUT("/projects/:id/tag-definitions/:definitionId", h.AssetTagDefinitionUpdate)
 	api.GET("/cvat-user-mappings", h.CVATUserMappingList)
 	api.PUT("/cvat-user-mappings", h.CVATUserMappingUpsert)
 	api.GET("/projects/:id/annotation-tasks", h.AnnotationTaskPage)

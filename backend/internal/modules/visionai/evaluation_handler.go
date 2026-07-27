@@ -7,7 +7,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/lohasle/nimbus-framework-go/internal/platform/config"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/httpx"
 	"gorm.io/gorm"
 )
@@ -183,9 +182,8 @@ func (h *Handler) EvaluationWorkbench(c *gin.Context) {
 		return
 	}
 	_ = appendAudit(h.db, c, project.ID, "FIFTYONE_WORKBENCH_OPENED", "EVALUATION_RUN", run.ID, nil, gin.H{"dataset": run.FiftyOneDataset})
-	cfg := config.Load()
-	target := strings.TrimRight(cfg.FiftyOnePublicURL, "/") + "/?dataset=" + url.QueryEscape(run.FiftyOneDataset)
-	launchURL, err := h.createWorkbenchLaunch("FIFTYONE", project, c.GetUint64("user_id"), "EVALUATION_RUN", run.ID, target)
+	target := configuredWorkbenchBase("FIFTYONE") + "/?dataset=" + url.QueryEscape(run.FiftyOneDataset)
+	launchURL, err := h.createWorkbenchLaunch(c, "FIFTYONE", project, c.GetUint64("user_id"), "EVALUATION_RUN", run.ID, target)
 	if err != nil {
 		workbenchLaunchError(c, "FiftyOne 工作台授权失败："+err.Error())
 		return

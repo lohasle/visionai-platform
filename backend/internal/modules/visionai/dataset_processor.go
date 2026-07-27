@@ -130,6 +130,11 @@ func validateDatasetVersion(ctx context.Context, db *gorm.DB, objectStore storag
 	if version.AnnotationRevisionID == 0 || db.Where("tenant_id = ? AND project_id = ? AND id = ?", version.TenantID, version.ProjectID, version.AnnotationRevisionID).First(&revision).Error != nil {
 		issues = append(issues, validationIssue(version, 0, "ERROR", "ANNOTATION_REVISION_MISSING", "数据集版本未引用有效的标注快照", "先完成标注审核与快照导出"))
 	} else {
+		if version.OntologyVersionID == 0 || revision.OntologyVersionID == 0 ||
+			version.OntologyVersionID != revision.OntologyVersionID ||
+			version.OntologyChecksum == "" || revision.OntologyChecksum != version.OntologyChecksum {
+			issues = append(issues, validationIssue(version, 0, "ERROR", "ONTOLOGY_VERSION_MISMATCH", "数据集与标注快照的类别体系版本或校验和不一致", "选择与标注快照一致的已发布类别版本创建新数据集版本"))
+		}
 		reader, _, err := objectStore.Get(ctx, revision.ObjectKey)
 		if err != nil {
 			issues = append(issues, validationIssue(version, 0, "ERROR", "ANNOTATION_OBJECT_MISSING", "标注快照对象不存在", "恢复快照对象或重新导出 Revision"))
@@ -145,9 +150,22 @@ func validateDatasetVersion(ctx context.Context, db *gorm.DB, objectStore storag
 		}
 	}
 	annotatedFrames := make(map[int]bool)
+	validLabelIDs := map[int64]bool{}
+	if revision.CategoryMapping != "" {
+		var categoryMapping []struct {
+			ID int64 `json:"id"`
+		}
+		if json.Unmarshal([]byte(revision.CategoryMapping), &categoryMapping) == nil {
+			for _, category := range categoryMapping {
+				if category.ID > 0 {
+					validLabelIDs[category.ID] = true
+				}
+			}
+		}
+	}
 	for _, shape := range snapshot.Shapes {
 		annotatedFrames[shape.Frame] = true
-		if shape.LabelID <= 0 {
+		if shape.LabelID <= 0 || (len(validLabelIDs) > 0 && !validLabelIDs[shape.LabelID]) {
 			issues = append(issues, validationIssue(version, 0, "ERROR", "CATEGORY_MISMATCH", "标注引用无效类别", "修复类别映射后重新导出"))
 		}
 		if shape.Frame >= 0 && shape.Frame < len(items) {
@@ -257,7 +275,8 @@ func freezeDatasetVersion(ctx context.Context, db *gorm.DB, objectStore storage.
 			db.Where("id = ?", version.DatasetID).First(&dataset)
 			return dataset.TaskType
 		}(),
-		"ontologyVersion": version.OntologyVersion, "splitSeed": version.SplitSeed,
+		"ontologyVersionId": version.OntologyVersionID, "ontologyVersion": version.OntologyVersion,
+		"ontologyChecksum": version.OntologyChecksum, "splitSeed": version.SplitSeed,
 		"splitConfig": json.RawMessage(version.SplitConfig), "items": manifestItems,
 		"annotationRevision": map[string]any{
 			"id": revision.ID, "uri": revision.SnapshotURI, "checksum": revision.Checksum, "format": revision.Format,
@@ -268,9 +287,10 @@ func freezeDatasetVersion(ctx context.Context, db *gorm.DB, objectStore storage.
 	checksum := hex.EncodeToString(sum[:])
 	root := assetRoot(version.TenantID, version.ProjectID) + "/datasets/" + strconv.FormatUint(version.DatasetID, 10) + "/" + version.SemanticVersion
 	manifestKey, cardKey := root+"/manifest.json", root+"/dataset-card.md"
-	card := fmt.Sprintf("# Dataset Card — %s\n\n- Version: %s\n- Items: %d\n- Train/Val/Test: %d/%d/%d\n- Ontology: %s\n- Annotation Revision: %d\n- Manifest SHA-256: `%s`\n- Frozen at: %s\n",
+	card := fmt.Sprintf("# Dataset Card — %s\n\n- Version: %s\n- Items: %d\n- Train/Val/Test: %d/%d/%d\n- Ontology: %s (#%d)\n- Ontology SHA-256: `%s`\n- Annotation Revision: %d\n- Manifest SHA-256: `%s`\n- Frozen at: %s\n",
 		version.SemanticVersion, version.SemanticVersion, version.ItemCount, version.TrainCount, version.ValidationCount, version.TestCount,
-		version.OntologyVersion, revision.ID, checksum, time.Now().UTC().Format(time.RFC3339))
+		version.OntologyVersion, version.OntologyVersionID, version.OntologyChecksum,
+		revision.ID, checksum, time.Now().UTC().Format(time.RFC3339))
 	if err := objectStore.Put(ctx, manifestKey, bytes.NewReader(raw), int64(len(raw)), "application/json"); err != nil {
 		return finishDatasetJob(db, version, false, "MANIFEST_WRITE_FAILED", err.Error())
 	}

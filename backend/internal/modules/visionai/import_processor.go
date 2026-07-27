@@ -41,7 +41,7 @@ func ProcessDomainEvent(ctx context.Context, db *gorm.DB, cfg config.Config, eve
 		return processAnnotationEvent(ctx, db, cfg, event)
 	case "dataset.validate.requested.v1", "dataset.freeze.requested.v1":
 		return processDatasetEvent(ctx, db, cfg, event)
-	case "training.run.requested.v1":
+	case "training.run.requested.v1", "training.template.smoke.requested.v1":
 		return processTrainingEvent(ctx, db, cfg, event)
 	case "evaluation.run.requested.v1":
 		return processEvaluationEvent(ctx, db, cfg, event)

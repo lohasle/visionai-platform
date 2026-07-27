@@ -130,9 +130,20 @@
           ><el-input-number v-model="versionForm.annotationRevisionId" :min="0"
         /></el-form-item>
         <div class="form-grid">
-          <el-form-item label="类别体系"
-            ><el-input v-model="versionForm.ontologyVersion"
-          /></el-form-item>
+          <el-form-item label="类别体系版本" required>
+            <el-select
+              v-model="versionForm.ontologyVersionId"
+              class="full"
+              placeholder="选择已发布版本"
+            >
+              <el-option
+                v-for="version in ontologyVersions"
+                :key="version.id"
+                :label="`${version.ontologyName} · ${version.semanticVersion} · ${version.labelCount} 类`"
+                :value="version.id"
+              />
+            </el-select>
+          </el-form-item>
           <el-form-item label="固定随机种子"
             ><el-input-number v-model="versionForm.splitSeed" :min="1"
           /></el-form-item>
@@ -221,6 +232,10 @@ import {
   type DatasetVersion
 } from '@/api/ai-platform/datasets'
 import { getProjectPage, type Project } from '@/api/ai-platform/projects'
+import {
+  getPublishedOntologyVersions,
+  type SelectableOntologyVersion
+} from '@/api/ai-platform/ontology'
 
 defineOptions({ name: 'VisionAIDatasets' })
 const message = useMessage()
@@ -230,6 +245,7 @@ const datasets = ref<Dataset[]>([])
 const selectedDataset = ref<Dataset>()
 const versions = ref<DatasetVersion[]>([])
 const collections = ref<AssetCollection[]>([])
+const ontologyVersions = ref<SelectableOntologyVersion[]>([])
 const loading = ref(false)
 const datasetVisible = ref(false)
 const versionVisible = ref(false)
@@ -239,7 +255,7 @@ const datasetForm = reactive({ name: '', taskType: 'CV_DETECTION', description: 
 const versionForm = reactive({
   sourceId: undefined as number | undefined,
   annotationRevisionId: 0,
-  ontologyVersion: 'defect-v1',
+  ontologyVersionId: undefined as number | undefined,
   splitSeed: 20260721,
   train: 0.8,
   val: 0.1,
@@ -260,13 +276,16 @@ const loadDatasets = async () => {
   if (!projectId.value) return
   loading.value = true
   try {
-    const [rows, collectionRows] = await Promise.all([
+    const [rows, collectionRows, versionRows] = await Promise.all([
       getDatasets(projectId.value),
-      getAssetCollections(projectId.value)
+      getAssetCollections(projectId.value),
+      getPublishedOntologyVersions(projectId.value)
     ])
     datasets.value = rows
     collections.value = collectionRows
+    ontologyVersions.value = versionRows
     versionForm.sourceId = frozenCollections.value[0]?.id
+    versionForm.ontologyVersionId = ontologyVersions.value[0]?.id
     if (!selectedDataset.value && rows[0]) await selectDataset(rows[0])
   } finally {
     loading.value = false
@@ -284,12 +303,18 @@ const submitDataset = async () => {
   await selectDataset(row)
 }
 const submitVersion = async () => {
-  if (!projectId.value || !selectedDataset.value || !versionForm.sourceId) return
+  if (
+    !projectId.value ||
+    !selectedDataset.value ||
+    !versionForm.sourceId ||
+    !versionForm.ontologyVersionId
+  )
+    return
   await createDatasetVersion(projectId.value, selectedDataset.value.id, {
     sourceType: 'COLLECTION',
     sourceId: versionForm.sourceId,
     annotationRevisionId: versionForm.annotationRevisionId,
-    ontologyVersion: versionForm.ontologyVersion,
+    ontologyVersionId: versionForm.ontologyVersionId,
     splitSeed: versionForm.splitSeed,
     split: { TRAIN: versionForm.train, VAL: versionForm.val, TEST: versionForm.test }
   })

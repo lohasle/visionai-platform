@@ -427,6 +427,23 @@ func (h *Handler) AssetPage(c *gin.Context) {
 	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
 		query = query.Where("filename LIKE ? OR sha256 LIKE ?", "%"+keyword+"%", keyword+"%")
 	}
+	tagValues := c.QueryArray("tagDefinitionIds")
+	if len(tagValues) == 0 && strings.TrimSpace(c.Query("tagDefinitionIds")) != "" {
+		tagValues = strings.Split(c.Query("tagDefinitionIds"), ",")
+	}
+	tagIDs := make([]uint64, 0, len(tagValues))
+	for _, value := range tagValues {
+		if id, err := strconv.ParseUint(strings.TrimSpace(value), 10, 64); err == nil && id > 0 {
+			tagIDs = append(tagIDs, id)
+		}
+	}
+	if len(tagIDs) > 0 {
+		query = query.Where(`id IN (
+			SELECT asset_id FROM ai_asset_tag
+			WHERE tenant_id = ? AND project_id = ? AND definition_id IN ?
+			GROUP BY asset_id HAVING COUNT(DISTINCT definition_id) = ?
+		)`, project.TenantID, project.ID, tagIDs, len(tagIDs))
+	}
 	var total int64
 	query.Count(&total)
 	pageNo, pageSize := page(c)
@@ -434,11 +451,17 @@ func (h *Handler) AssetPage(c *gin.Context) {
 	query.Order("id DESC").Offset((pageNo - 1) * pageSize).Limit(pageSize).Find(&rows)
 	type assetPageView struct {
 		Asset
-		ThumbnailURL string `json:"thumbnailUrl"`
+		ThumbnailURL string         `json:"thumbnailUrl"`
+		Tags         []assetTagView `json:"tags"`
 	}
+	assetIDs := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		assetIDs = append(assetIDs, row.ID)
+	}
+	tagsByAsset := assetTagViews(h.db, project, assetIDs)
 	result := make([]assetPageView, 0, len(rows))
 	for _, row := range rows {
-		view := assetPageView{Asset: row}
+		view := assetPageView{Asset: row, Tags: tagsByAsset[row.ID]}
 		if h.storage != nil && row.ThumbnailObjectKey != "" {
 			if signed, err := h.storage.PresignedGet(c.Request.Context(), row.ThumbnailObjectKey, 10*time.Minute); err == nil {
 				view.ThumbnailURL = signed.String()
@@ -488,7 +511,10 @@ func (h *Handler) AssetGet(c *gin.Context) {
 			thumbnailURL = signed.String()
 		}
 	}
-	httpx.OK(c, gin.H{"asset": asset, "metadata": metadata, "previewUrl": previewURL, "thumbnailUrl": thumbnailURL, "previewExpiresIn": 600})
+	httpx.OK(c, gin.H{
+		"asset": asset, "metadata": metadata, "tags": assetTagViews(h.db, project, []uint64{asset.ID})[asset.ID],
+		"previewUrl": previewURL, "thumbnailUrl": thumbnailURL, "previewExpiresIn": 600,
+	})
 }
 
 // AssetDelete godoc

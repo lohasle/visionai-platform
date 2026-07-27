@@ -27,6 +27,7 @@ type datasetVersionRequest struct {
 	SourceID             uint64             `json:"sourceId"`
 	ParentID             uint64             `json:"parentId"`
 	AnnotationRevisionID uint64             `json:"annotationRevisionId"`
+	OntologyVersionID    uint64             `json:"ontologyVersionId"`
 	OntologyVersion      string             `json:"ontologyVersion"`
 	SplitSeed            int64              `json:"splitSeed"`
 	Split                map[string]float64 `json:"split"`
@@ -181,6 +182,12 @@ func (h *Handler) DatasetVersionCreate(c *gin.Context) {
 			return
 		}
 		req.SourceID, req.ParentID = parent.ID, parent.ID
+		if req.AnnotationRevisionID == 0 {
+			req.AnnotationRevisionID = parent.AnnotationRevisionID
+		}
+		if req.OntologyVersionID == 0 {
+			req.OntologyVersionID = parent.OntologyVersionID
+		}
 		h.db.Model(&DatasetVersionItem{}).Where("tenant_id = ? AND dataset_version_id = ?", project.TenantID, parent.ID).Order("id").Pluck("asset_id", &assetIDs)
 	default:
 		httpx.Fail(c, 400, 400, "sourceType 必须是 COLLECTION 或 PARENT_VERSION")
@@ -196,14 +203,18 @@ func (h *Handler) DatasetVersionCreate(c *gin.Context) {
 			httpx.Fail(c, 400, 400, "标注 Revision 不存在或跨项目")
 			return
 		}
-		if req.OntologyVersion == "" {
-			var task AnnotationTask
-			h.db.Where("id = ?", revision.AnnotationTaskID).First(&task)
-			req.OntologyVersion = task.OntologyVersion
+		if req.OntologyVersionID == 0 {
+			req.OntologyVersionID = revision.OntologyVersionID
+		}
+		if revision.OntologyVersionID != 0 && req.OntologyVersionID != revision.OntologyVersionID {
+			httpx.Fail(c, 409, 409, "数据集类别体系版本与标注 Revision 不一致")
+			return
 		}
 	}
-	if req.OntologyVersion == "" {
-		req.OntologyVersion = "v1"
+	ontologyVersion, _, ontologyErr := loadPublishedOntologyVersion(h.db, project, req.OntologyVersionID, dataset.TaskType)
+	if ontologyErr != nil {
+		httpx.Fail(c, 409, 409, ontologyErr.Error())
+		return
 	}
 	var version DatasetVersion
 	err := h.db.Transaction(func(tx *gorm.DB) error {
@@ -213,8 +224,10 @@ func (h *Handler) DatasetVersionCreate(c *gin.Context) {
 		version = DatasetVersion{
 			TenantID: project.TenantID, ProjectID: project.ID, DatasetID: dataset.ID, VersionNo: versionNo,
 			SemanticVersion: fmt.Sprintf("v%d", versionNo), ParentID: req.ParentID, SourceType: req.SourceType,
-			SourceID: req.SourceID, AnnotationRevisionID: req.AnnotationRevisionID, OntologyVersion: req.OntologyVersion,
-			SplitSeed: req.SplitSeed, SplitConfig: jsonValue(split), Status: DatasetVersionDraft,
+			SourceID: req.SourceID, AnnotationRevisionID: req.AnnotationRevisionID,
+			OntologyVersionID: ontologyVersion.ID, OntologyVersion: ontologyVersion.SemanticVersion,
+			OntologyChecksum: ontologyVersion.Checksum,
+			SplitSeed:        req.SplitSeed, SplitConfig: jsonValue(split), Status: DatasetVersionDraft,
 			ItemCount: int64(len(assetIDs)), ValidationSummary: "{}",
 			CreatedBy: c.GetUint64("user_id"),
 		}
@@ -405,7 +418,60 @@ func (h *Handler) DatasetVersionCompare(c *gin.Context) {
 			removed++
 		}
 	}
-	httpx.OK(c, gin.H{"left": left, "right": right, "added": added, "removed": removed, "unchanged": len(rightSet) - added})
+	versionByID := make(map[uint64]DatasetVersion, 2)
+	for _, version := range versions {
+		versionByID[version.ID] = version
+	}
+	loadCategories := func(versionID uint64) map[string]string {
+		var rows []OntologyLabel
+		h.db.Where("tenant_id = ? AND ontology_version_id = ?", project.TenantID, versionID).
+			Order("sort, id").Find(&rows)
+		result := make(map[string]string, len(rows))
+		for _, row := range rows {
+			result[row.Code] = row.Name
+		}
+		return result
+	}
+	leftCategories := loadCategories(versionByID[left].OntologyVersionID)
+	rightCategories := loadCategories(versionByID[right].OntologyVersionID)
+	categoryAdded, categoryRemoved := make([]gin.H, 0), make([]gin.H, 0)
+	for code, name := range rightCategories {
+		if _, exists := leftCategories[code]; !exists {
+			categoryAdded = append(categoryAdded, gin.H{"code": code, "name": name})
+		}
+	}
+	for code, name := range leftCategories {
+		if _, exists := rightCategories[code]; !exists {
+			categoryRemoved = append(categoryRemoved, gin.H{"code": code, "name": name})
+		}
+	}
+	loadTagDistribution := func(versionID uint64) map[string]int64 {
+		var rows []struct {
+			Code  string
+			Name  string
+			Count int64
+		}
+		h.db.Table("ai_dataset_version_item i").
+			Select("d.code, d.name, COUNT(DISTINCT i.asset_id) AS count").
+			Joins("JOIN ai_asset_tag t ON t.asset_id = i.asset_id AND t.tenant_id = i.tenant_id").
+			Joins("JOIN ai_asset_tag_definition d ON d.id = t.definition_id AND d.tenant_id = t.tenant_id").
+			Where("i.tenant_id = ? AND i.dataset_version_id = ?", project.TenantID, versionID).
+			Group("d.id").Order("d.category, d.code").Scan(&rows)
+		result := make(map[string]int64, len(rows))
+		for _, row := range rows {
+			result[row.Code+"|"+row.Name] = row.Count
+		}
+		return result
+	}
+	httpx.OK(c, gin.H{
+		"left": left, "right": right, "added": added, "removed": removed, "unchanged": len(rightSet) - added,
+		"ontology": gin.H{
+			"same":          versionByID[left].OntologyVersionID == versionByID[right].OntologyVersionID,
+			"leftVersionId": versionByID[left].OntologyVersionID, "rightVersionId": versionByID[right].OntologyVersionID,
+			"addedCategories": categoryAdded, "removedCategories": categoryRemoved,
+		},
+		"tagDistribution": gin.H{"left": loadTagDistribution(left), "right": loadTagDistribution(right)},
+	})
 }
 
 type deprecateRequest struct {

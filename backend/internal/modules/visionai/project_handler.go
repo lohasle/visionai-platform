@@ -338,6 +338,9 @@ func (h *Handler) ProjectClone(c *gin.Context) {
 		if err := tx.Create(&ProjectConfig{TenantID: clone.TenantID, ProjectID: clone.ID, StorageConfig: sourceConfig.StorageConfig, ProviderConfig: sourceConfig.ProviderConfig, SecretRefs: "{}"}).Error; err != nil {
 			return err
 		}
+		if err := cloneProjectOntologies(tx, source, clone, clone.CreatedBy); err != nil {
+			return err
+		}
 		return appendAudit(tx, c, clone.ID, "PROJECT_CLONED", "PROJECT", clone.ID, gin.H{"sourceProjectId": source.ID}, clone)
 	})
 	if err != nil {

@@ -1,0 +1,95 @@
+{
+  "schemaVersion": "visionai.acceptance-evidence.v1",
+  "dataset": {
+    "name": "COCO128",
+    "sourceUrl": "https://github.com/ultralytics/assets/releases/download/v0.0.0/coco128.zip",
+    "archiveSha256": "61e5e3028863d8ffc3b81d6a514603954889f0edd5e4b44c4ce60b2da99aeb8e",
+    "images": 128,
+    "yoloLabelFiles": 128,
+    "cvatShapes": 929
+  },
+  "lineage": {
+    "projectId": 22,
+    "assetImportId": 19,
+    "assetCount": 128,
+    "collectionId": 27,
+    "ontologyVersion": "COCO 2017 Detection v1",
+    "ontologyClassCount": 80,
+    "annotationTaskId": 26,
+    "cvatTaskId": 26,
+    "annotationRevisionId": 14,
+    "annotationCount": 929,
+    "datasetId": 14,
+    "datasetVersionId": 16,
+    "datasetStatus": "FROZEN",
+    "trainingRunId": 13,
+    "trainingStatus": "SUCCEEDED",
+    "evaluationRunId": 18,
+    "evaluationStatus": "SUCCEEDED",
+    "gateDecision": "PASSED",
+    "modelVersionId": 10,
+    "approvalId": 9,
+    "deploymentId": 10,
+    "deploymentRevisionId": 11,
+    "deploymentStatus": "RUNNING",
+    "feedbackBatchId": 9,
+    "feedbackAnnotationTaskId": 27,
+    "feedbackStatus": "READY"
+  },
+  "gpu": {
+    "model": "NVIDIA GeForce RTX 3060",
+    "memoryBytes": 12884377600,
+    "peakTrainingMemoryBytes": 429227008,
+    "cudaRuntime": "12.6",
+    "driver": "591.86",
+    "torch": "2.7.1+cu126",
+    "torchvision": "0.22.1+cu126"
+  },
+  "trainingArtifact": {
+    "name": "model.pt",
+    "sizeBytes": 77822403,
+    "sha256": "82c272a9e47e27008205cf692e03e3126e144815d803a0eb83c7bafeba98ccf4",
+    "architecture": "fasterrcnn_mobilenet_v3_large_320_fpn"
+  },
+  "evaluation": {
+    "mAP": 0.540419,
+    "meanIoU": 0.800548,
+    "precision": 0.646593,
+    "recall": 0.439182,
+    "truePositives": 408,
+    "falsePositives": 223,
+    "falseNegatives": 521,
+    "latencyMs": 25.86,
+    "fiftyOneDataset": "tenant-1-project-22-evaluation-18"
+  },
+  "inferenceExamples": [
+    {
+      "label": "giraffe",
+      "confidence": 0.994751
+    },
+    {
+      "label": "vase",
+      "confidence": 0.980144
+    },
+    {
+      "label": "potted plant",
+      "confidence": 0.917971
+    }
+  ],
+  "runnerBoundary": {
+    "apiDockerSocketMounted": false,
+    "runner": "visionai-orchestrator",
+    "templateSmokeVersionId": 14,
+    "templateSmokeJobId": 131,
+    "templateSmokeStatus": "PASSED"
+  },
+  "embeddedWorkbenches": {
+    "cvat": "PASSED",
+    "fiftyOne": "PASSED",
+    "hostSelection": "request-host",
+    "serviceDiscovery": "docker-dns-runtime"
+  },
+  "completedAt": "2026-07-27T03:33:42.6906268Z",
+  "runnerBoundaryVerifiedAt": "2026-07-27T03:45:00Z",
+  "embeddedWorkbenchesVerifiedAt": "2026-07-27T03:59:00Z"
+}

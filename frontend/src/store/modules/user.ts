@@ -57,10 +57,8 @@ export const useUserStore = defineStore('admin-user', {
       if (!userInfo) {
         userInfo = await getInfo()
       } else {
-        // 特殊：在有缓存的情况下，进行加载。但是即使加载失败，也不影响后续的操作，保证可以进入系统
-        try {
-          userInfo = await getInfo()
-        } catch (error) {}
+        // 缓存只能加速首屏，不能掩盖令牌失效。认证失败必须交给路由守卫清理凭据并返回登录页。
+        userInfo = await getInfo()
       }
       this.permissions = new Set(userInfo.permissions || []) // 兜底为 [] https://t.zsxq.com/xCJew
       this.roles = userInfo.roles

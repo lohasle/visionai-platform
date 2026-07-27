@@ -6,6 +6,8 @@ import (
 	"image/color"
 	"image/png"
 	"testing"
+
+	platforminference "github.com/lohasle/nimbus-framework-go/internal/platform/inference"
 )
 
 func TestValidateRegressionImage(t *testing.T) {
@@ -25,11 +27,7 @@ func TestValidateRegressionImage(t *testing.T) {
 }
 
 func TestEvaluateRegression(t *testing.T) {
-	detections := []struct {
-		Label      string    `json:"label"`
-		Confidence float64   `json:"confidence"`
-		BBox       []float64 `json:"bbox"`
-	}{
+	detections := []platforminference.Detection{
 		{Label: "person", Confidence: 0.92},
 		{Label: "PERSON", Confidence: 0.48},
 		{Label: "car", Confidence: 0.99},
