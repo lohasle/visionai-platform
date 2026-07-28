@@ -1,4 +1,5 @@
 import request from '@/config/axios'
+import CryptoJS from 'crypto-js'
 
 export interface Asset {
   id: number
@@ -109,10 +110,14 @@ export const purgeAsset = (projectId: number, assetId: number) =>
   request.post({ url: `/ai-platform/projects/${projectId}/assets/${assetId}/purge` })
 
 const sha256 = async (blob: Blob) => {
-  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())
-  return Array.from(new Uint8Array(digest))
-    .map((value) => value.toString(16).padStart(2, '0'))
-    .join('')
+  const buffer = await blob.arrayBuffer()
+  if (globalThis.crypto?.subtle) {
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', buffer)
+    return Array.from(new Uint8Array(digest))
+      .map((value) => value.toString(16).padStart(2, '0'))
+      .join('')
+  }
+  return CryptoJS.SHA256(CryptoJS.lib.WordArray.create(buffer as any)).toString(CryptoJS.enc.Hex)
 }
 
 export const uploadAsset = async (

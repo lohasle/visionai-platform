@@ -1030,7 +1030,7 @@ func (h *Handler) AssetQuality(c *gin.Context) {
 		Status AssetStatus `json:"status"`
 		Count  int64       `json:"count"`
 	}
-	var counts []statusCount
+	counts := make([]statusCount, 0)
 	h.db.Model(&Asset{}).Select("status, count(*) as count").Where("tenant_id = ? AND project_id = ?", project.TenantID, project.ID).Group("status").Scan(&counts)
 	var duplicateGroups int64
 	h.db.Raw("SELECT COUNT(*) FROM (SELECT sha256 FROM ai_asset WHERE tenant_id = ? AND project_id = ? AND status = ? GROUP BY sha256 HAVING COUNT(*) > 1) d", project.TenantID, project.ID, AssetReady).Scan(&duplicateGroups)

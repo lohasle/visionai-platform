@@ -504,7 +504,7 @@ const tagGroups = computed(() =>
 )
 
 const qualityCount = (status: string) =>
-  quality.byStatus.find((item) => item.status === status)?.count || 0
+  (quality.byStatus || []).find((item) => item.status === status)?.count || 0
 const formatSize = (size: number) =>
   size < 1024 * 1024 ? `${(size / 1024).toFixed(1)} KiB` : `${(size / 1024 / 1024).toFixed(1)} MiB`
 
@@ -527,7 +527,13 @@ const loadAll = async () => {
   if (!projectId.value) return
   await Promise.all([
     loadAssets(),
-    getAssetQuality(projectId.value).then((data) => Object.assign(quality, data)),
+    getAssetQuality(projectId.value).then((data) =>
+      Object.assign(quality, {
+        byStatus: data.byStatus || [],
+        duplicateGroups: data.duplicateGroups || 0,
+        nearDuplicateGroups: data.nearDuplicateGroups || 0
+      })
+    ),
     getTagDefinitions(projectId.value).then((data) => (tagDefinitions.value = data))
   ])
 }
