@@ -121,7 +121,7 @@
               }}
             </p>
           </div>
-          <span class="scope-note">{{ summary.resources.gpuHours.toFixed(2) }} GPUh</span>
+          <span class="scope-note">{{ Number(summary.resources.gpuHours || 0).toFixed(2) }} GPUh</span>
         </header>
         <div v-if="summary.resources.visibility === 'DETAIL'" class="resource-list">
           <div v-for="node in summary.resources.nodes || []" :key="node.id" class="resource-node">
@@ -133,7 +133,7 @@
               <span class="status-dot" :class="serviceTone(node.status)">{{ node.status }}</span>
             </div>
             <label
-              >GPU 利用率 <b>{{ node.gpuUtilization.toFixed(0) }}%</b></label
+              >GPU 利用率 <b>{{ Number(node.gpuUtilization || 0).toFixed(0) }}%</b></label
             >
             <el-progress :percentage="Math.min(100, node.gpuUtilization)" :stroke-width="6" />
             <label
@@ -358,7 +358,7 @@ const metrics = computed(() => [
   },
   {
     label: 'GPU 用量',
-    value: summary.metrics.gpuHours.toFixed(2),
+    value: Number(summary.metrics.gpuHours || 0).toFixed(2),
     note: '累计 GPU 小时',
     icon: 'lucide:cpu',
     tone: 'violet'
