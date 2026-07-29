@@ -1,3 +1,8 @@
+> [!IMPORTANT]
+> **Moved to [aiutil/visionai-platform](https://github.com/aiutil/visionai-platform). This repository is archived and no longer updated.**
+>
+> **本项目已迁移至 [aiutil/visionai-platform](https://github.com/aiutil/visionai-platform)。本仓库已归档，不再更新。**
+
 # VisionAI 企业级计算机视觉算法平台
 
 VisionAI 是一套从数据进入、标注、数据集版本化、训练、评估、模型审批、部署推理到生产反馈闭环的企业级计算机视觉平台。项目基于 [lohasle/nimbus-framework-go](https://github.com/lohasle/nimbus-framework-go) 构建，后端采用 Go 模块化单体与异步编排器，前端采用 Vue 3，基础设施由 Docker Compose 一键拉起。
