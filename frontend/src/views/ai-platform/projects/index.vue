@@ -87,6 +87,65 @@
         <el-form-item label="项目说明">
           <el-input v-model="projectForm.description" type="textarea" :rows="3" maxlength="1024" />
         </el-form-item>
+        <template v-if="!cloneSource">
+          <div class="form-grid">
+            <el-form-item label="AI 领域" required>
+              <el-select v-model="projectForm.aiDomain" class="full-width">
+                <el-option label="计算机视觉" value="CV" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="任务类型" required>
+              <el-select v-model="projectForm.taskType" class="full-width">
+                <el-option label="目标检测" value="CV_DETECTION" />
+                <el-option label="实例分割" value="CV_SEGMENTATION" />
+                <el-option label="关键点" value="CV_KEYPOINT" />
+                <el-option label="视频跟踪" value="CV_TRACKING" />
+              </el-select>
+            </el-form-item>
+          </div>
+          <el-form-item label="项目负责人" required>
+            <el-select
+              v-model="projectForm.ownerUserId"
+              filterable
+              class="full-width"
+              placeholder="选择租户用户"
+            >
+              <el-option
+                v-for="user in users.filter((item) => item.status === 0)"
+                :key="user.id"
+                :label="`${user.nickname || user.username} · ${user.username}`"
+                :value="user.id"
+              />
+            </el-select>
+          </el-form-item>
+          <div class="form-grid">
+            <el-form-item label="默认训练 Provider" required>
+              <el-select v-model="projectForm.defaultProvider" class="full-width">
+                <el-option label="本机 Docker" value="LOCAL_DOCKER" />
+                <el-option label="ClearML" value="CLEARML" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="对象存储空间" required>
+              <el-input v-model.trim="projectForm.storageBucket" placeholder="visionai-assets" />
+            </el-form-item>
+          </div>
+          <div class="form-grid quota-grid">
+            <el-form-item label="最大并发任务">
+              <el-input-number v-model="projectForm.maxConcurrentJobs" :min="1" :max="128" />
+            </el-form-item>
+            <el-form-item label="月度 GPU 小时">
+              <el-input-number v-model="projectForm.monthlyGpuHours" :min="1" :max="100000" />
+            </el-form-item>
+          </div>
+          <el-form-item label="存储配额（GiB）">
+            <el-input-number
+              :model-value="Math.round(projectForm.storageBytes / 1073741824)"
+              :min="1"
+              :max="1048576"
+              @update:model-value="projectForm.storageBytes = Number($event) * 1073741824"
+            />
+          </el-form-item>
+        </template>
       </el-form>
       <template #footer>
         <el-button @click="createVisible = false">取消</el-button>
@@ -135,31 +194,110 @@
         </div>
         <el-tabs v-model="activeTab" @tab-change="loadTab">
           <el-tab-pane label="概览" name="overview">
-            <dl class="overview-list">
-              <div
-                ><dt>项目编码</dt><dd>{{ selected.code }}</dd></div
-              >
-              <div
-                ><dt>负责人</dt><dd>#{{ selected.ownerUserId }}</dd></div
-              >
-              <div
-                ><dt>创建时间</dt><dd>{{ formatDate(selected.createTime) }}</dd></div
-              >
-              <div
-                ><dt>项目说明</dt><dd>{{ selected.description || '暂无' }}</dd></div
-              >
-            </dl>
+            <div v-loading="tabLoading" class="project-overview">
+              <dl class="overview-list">
+                <div
+                  ><dt>项目编码</dt><dd>{{ selected.code }}</dd></div
+                >
+                <div
+                  ><dt>AI / 任务类型</dt
+                  ><dd>{{ selected.aiDomain }} · {{ selected.taskType }}</dd></div
+                >
+                <div
+                  ><dt>负责人</dt><dd>#{{ selected.ownerUserId }}</dd></div
+                >
+                <div
+                  ><dt>默认 Provider</dt><dd>{{ selected.defaultProvider }}</dd></div
+                >
+                <div
+                  ><dt>对象存储空间</dt><dd>{{ selected.storageBucket }}</dd></div
+                >
+                <div
+                  ><dt>创建时间</dt><dd>{{ formatDate(selected.createTime) }}</dd></div
+                >
+                <div
+                  ><dt>项目说明</dt><dd>{{ selected.description || '暂无' }}</dd></div
+                >
+              </dl>
+              <section v-if="overview" class="overview-metrics" aria-label="生命周期资产统计">
+                <article v-for="item in overviewMetricCards" :key="item.label">
+                  <span>{{ item.label }}</span>
+                  <strong>{{ item.value }}</strong>
+                </article>
+              </section>
+              <section v-if="overview" class="overview-section">
+                <header>
+                  <div><h3>项目风险</h3><p>失败任务、生产告警和待审批事项。</p></div>
+                  <el-tag :type="overview.risks.length ? 'danger' : 'success'">
+                    {{ overview.risks.length ? `${overview.risks.length} 项` : '无未处理风险' }}
+                  </el-tag>
+                </header>
+                <button
+                  v-for="risk in overview.risks"
+                  :key="risk.code"
+                  type="button"
+                  class="risk-row"
+                  @click="router.push(risk.route)"
+                >
+                  <el-tag :type="risk.severity === 'HIGH' ? 'danger' : 'warning'">
+                    {{ risk.severity }}
+                  </el-tag>
+                  <span>{{ risk.message }}</span>
+                  <strong>{{ risk.count }}</strong>
+                </button>
+                <p v-if="!overview.risks.length" class="empty-copy"
+                  >当前没有未处理的生命周期风险。</p
+                >
+              </section>
+              <section v-if="overview" class="overview-section">
+                <header>
+                  <div><h3>业务时间线</h3><p>仅展示项目级关键业务变更。</p></div>
+                </header>
+                <ol class="timeline-list">
+                  <li v-for="event in overview.timeline.slice(0, 12)" :key="event.id">
+                    <span class="timeline-dot"></span>
+                    <div>
+                      <strong>{{ event.action }}</strong>
+                      <p
+                        >{{ event.resourceType }} #{{ event.resourceId }} · 用户 #{{
+                          event.actorUserId
+                        }}</p
+                      >
+                    </div>
+                    <time>{{ formatDate(event.createTime) }}</time>
+                  </li>
+                </ol>
+              </section>
+            </div>
           </el-tab-pane>
-          <el-tab-pane label="成员与角色" name="members">
+          <el-tab-pane label="项目成员" name="members">
             <div class="tab-header">
-              <p>角色变更由后端即时鉴权。</p>
-              <el-button type="primary" plain @click="memberVisible = true">添加成员</el-button>
+              <div>
+                <p>项目只维护成员范围，权限实时继承系统角色。</p>
+                <el-button link type="primary" @click="router.push('/system/role')">
+                  前往系统角色管理
+                </el-button>
+              </div>
+              <el-button type="primary" plain @click="openMemberDialog">添加成员</el-button>
             </div>
             <el-table :data="members" v-loading="tabLoading">
-              <el-table-column prop="userId" label="用户 ID" width="110" />
-              <el-table-column label="项目角色">
+              <el-table-column label="成员" min-width="180">
                 <template #default="{ row }">
-                  <el-tag v-for="role in row.roles" :key="role" class="role-tag">{{ role }}</el-tag>
+                  <strong>{{ row.nickname || row.username }}</strong>
+                  <small class="member-account">{{ row.username }} · #{{ row.userId }}</small>
+                </template>
+              </el-table-column>
+              <el-table-column label="系统角色" min-width="220">
+                <template #default="{ row }">
+                  <el-tag
+                    v-for="role in row.roles"
+                    :key="role.id"
+                    class="role-tag"
+                    :type="role.status === 0 ? 'primary' : 'info'"
+                  >
+                    {{ role.name }}
+                  </el-tag>
+                  <span v-if="!row.roles.length" class="empty-role">未分配系统角色</span>
                 </template>
               </el-table-column>
               <el-table-column width="90" align="right">
@@ -177,6 +315,43 @@
               show-icon
             />
             <el-form class="config-form" label-position="top" v-loading="tabLoading">
+              <div class="form-grid">
+                <el-form-item label="CVAT 实例">
+                  <el-select v-model="configForm.cvatInstanceId" clearable class="full-width">
+                    <el-option
+                      v-for="item in providerInstances('CVAT')"
+                      :key="item.id"
+                      :label="`${item.name} · ${item.status}`"
+                      :value="item.id"
+                    />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="ClearML 实例">
+                  <el-select v-model="configForm.clearmlInstanceId" clearable class="full-width">
+                    <el-option
+                      v-for="item in providerInstances('CLEARML')"
+                      :key="item.id"
+                      :label="`${item.name} · ${item.status}`"
+                      :value="item.id"
+                    />
+                  </el-select>
+                </el-form-item>
+              </div>
+              <div class="form-grid">
+                <el-form-item label="FiftyOne 实例">
+                  <el-select v-model="configForm.fiftyOneInstanceId" clearable class="full-width">
+                    <el-option
+                      v-for="item in providerInstances('FIFTYONE')"
+                      :key="item.id"
+                      :label="`${item.name} · ${item.status}`"
+                      :value="item.id"
+                    />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="默认训练队列">
+                  <el-input v-model.trim="configForm.defaultQueue" placeholder="gpu-local" />
+                </el-form-item>
+              </div>
               <el-form-item label="对象存储 Endpoint">
                 <el-input
                   v-model="configForm.storageEndpoint"
@@ -195,21 +370,45 @@
                   placeholder="vault://visionai/provider"
                 />
               </el-form-item>
-              <el-button type="primary" :loading="saving" @click="saveConfig">保存配置</el-button>
+              <el-form-item label="变更原因" required>
+                <el-input
+                  v-model.trim="configForm.changeReason"
+                  type="textarea"
+                  :rows="2"
+                  placeholder="说明本次 Provider、对象存储或队列配置变更的原因"
+                />
+              </el-form-item>
+              <div class="config-actions">
+                <el-button :loading="saving" @click="testSelectedProviders">测试所选连接</el-button>
+                <el-button type="primary" :loading="saving" @click="saveConfig">保存配置</el-button>
+              </div>
             </el-form>
           </el-tab-pane>
         </el-tabs>
       </template>
     </el-drawer>
 
-    <el-dialog v-model="memberVisible" title="添加或更新成员" width="520">
+    <el-dialog v-model="memberVisible" title="添加项目成员" width="520">
+      <el-alert
+        title="角色请在“系统管理 → 用户管理 → 分配角色”中统一设置"
+        type="info"
+        :closable="false"
+        show-icon
+      />
       <el-form label-position="top">
-        <el-form-item label="租户用户 ID" required>
-          <el-input-number v-model="memberForm.userId" :min="1" controls-position="right" />
-        </el-form-item>
-        <el-form-item label="项目角色" required>
-          <el-select v-model="memberForm.roles" multiple class="full-width">
-            <el-option v-for="role in roleOptions" :key="role" :label="role" :value="role" />
+        <el-form-item label="租户用户" required class="member-user-field">
+          <el-select
+            v-model="memberForm.userId"
+            filterable
+            class="full-width"
+            placeholder="选择系统用户"
+          >
+            <el-option
+              v-for="user in availableMemberUsers"
+              :key="user.id"
+              :label="`${user.nickname || user.username} · ${user.username}`"
+              :value="user.id"
+            />
           </el-select>
         </el-form-item>
       </el-form>
@@ -228,19 +427,24 @@ import {
   createProject,
   getProjectConfig,
   getProjectMembers,
+  getProjectOverview,
   getProjectPage,
   removeProjectMember,
   updateProjectConfig,
   updateProjectStatus,
   upsertProjectMember,
   type Project,
+  type ProjectOverview,
   type ProjectMember,
   type ProjectStatus
 } from '@/api/ai-platform/projects'
+import { getIntegrations, testIntegration } from '@/api/ai-platform/operations'
+import { getSimpleUserList, type UserVO } from '@/api/system/user'
 
 defineOptions({ name: 'VisionAIProjects' })
 
 const message = useMessage()
+const router = useRouter()
 const statusOptions = [
   { label: '草稿', value: 'DRAFT' },
   { label: '运行中', value: 'ACTIVE' },
@@ -253,18 +457,12 @@ const statusMeta: Record<ProjectStatus, { label: string; type: 'info' | 'success
   SUSPENDED: { label: '已暂停', type: 'warning' },
   ARCHIVED: { label: '已归档', type: 'info' }
 }
-const roleOptions = [
-  'DATA_MANAGER',
-  'ANNOTATOR',
-  'REVIEWER',
-  'ALGORITHM_ENGINEER',
-  'APPROVER',
-  'OPS',
-  'AUDITOR'
-]
 const query = reactive({ pageNo: 1, pageSize: 12, keyword: '', status: '' })
 const projects = ref<Project[]>([])
 const members = ref<ProjectMember[]>([])
+const users = ref<UserVO[]>([])
+const overview = ref<ProjectOverview>()
+const integrations = ref<Array<Record<string, any>>>([])
 const total = ref(0)
 const loading = ref(false)
 const tabLoading = ref(false)
@@ -276,13 +474,48 @@ const memberVisible = ref(false)
 const selected = ref<Project>()
 const cloneSource = ref<Project>()
 const activeTab = ref('overview')
-const projectForm = reactive({ code: '', name: '', description: '' })
-const memberForm = reactive<{ userId: number; roles: string[] }>({ userId: 1, roles: [] })
+const projectForm = reactive({
+  code: '',
+  name: '',
+  description: '',
+  aiDomain: 'CV',
+  taskType: 'CV_DETECTION',
+  ownerUserId: undefined as number | undefined,
+  defaultProvider: 'LOCAL_DOCKER',
+  storageBucket: 'visionai-assets',
+  maxConcurrentJobs: 2,
+  monthlyGpuHours: 100,
+  storageBytes: 100 * 1024 * 1024 * 1024
+})
+const memberForm = reactive<{ userId?: number }>({ userId: undefined })
+const availableMemberUsers = computed(() => {
+  const existing = new Set(members.value.map((member) => member.userId))
+  return users.value.filter((user) => user.status === 0 && !existing.has(user.id))
+})
 const configForm = reactive({
   storageEndpoint: '',
   bucket: '',
   trainingEndpoint: '',
-  credentialRef: ''
+  credentialRef: '',
+  cvatInstanceId: undefined as number | undefined,
+  clearmlInstanceId: undefined as number | undefined,
+  fiftyOneInstanceId: undefined as number | undefined,
+  defaultQueue: 'gpu-local',
+  changeReason: ''
+})
+const providerInstances = (providerType: string) =>
+  integrations.value.filter((item) => item.providerType === providerType)
+const overviewMetricCards = computed(() => {
+  const metrics = overview.value?.metrics
+  if (!metrics) return []
+  return [
+    { label: '数据资产', value: metrics.assets },
+    { label: '标注任务', value: metrics.annotations },
+    { label: '数据集版本', value: metrics.datasetVersions },
+    { label: '训练运行', value: metrics.trainingRuns },
+    { label: '模型版本', value: metrics.modelVersions },
+    { label: '部署', value: metrics.deployments }
+  ]
 })
 
 const formatDate = (value: string) => new Date(value).toLocaleString('zh-CN', { hour12: false })
@@ -306,14 +539,31 @@ const openCreate = (source?: Project) => {
   Object.assign(projectForm, {
     code: source ? `${source.code}-copy` : '',
     name: source ? `${source.name} 副本` : '',
-    description: source?.description || ''
+    description: source?.description || '',
+    aiDomain: source?.aiDomain || 'CV',
+    taskType: source?.taskType || 'CV_DETECTION',
+    ownerUserId: source?.ownerUserId || users.value.find((item) => item.username === 'admin')?.id,
+    defaultProvider: source?.defaultProvider || 'LOCAL_DOCKER',
+    storageBucket: source?.storageBucket || 'visionai-assets',
+    maxConcurrentJobs: 2,
+    monthlyGpuHours: 100,
+    storageBytes: 100 * 1024 * 1024 * 1024
   })
   createVisible.value = true
 }
 
 const submitProject = async () => {
-  if (!projectForm.code.trim() || !projectForm.name.trim()) {
-    message.warning('请填写项目编码和名称')
+  if (
+    !projectForm.code.trim() ||
+    !projectForm.name.trim() ||
+    (!cloneSource.value &&
+      (!projectForm.ownerUserId ||
+        !projectForm.aiDomain ||
+        !projectForm.taskType ||
+        !projectForm.defaultProvider ||
+        !projectForm.storageBucket.trim()))
+  ) {
+    message.warning('请填写项目编码、名称、AI/任务类型、负责人、Provider 和对象存储空间')
     return
   }
   saving.value = true
@@ -328,10 +578,11 @@ const submitProject = async () => {
   }
 }
 
-const openProject = (project: Project) => {
+const openProject = async (project: Project) => {
   selected.value = project
   activeTab.value = 'overview'
   drawerVisible.value = true
+  await loadTab('overview')
 }
 
 const changeStatus = async (status: ProjectStatus) => {
@@ -354,6 +605,7 @@ const loadTab = async (name: string | number) => {
   if (!selected.value) return
   tabLoading.value = true
   try {
+    if (name === 'overview') overview.value = await getProjectOverview(selected.value.id)
     if (name === 'members') members.value = await getProjectMembers(selected.value.id)
     if (name === 'config') {
       const data = await getProjectConfig(selected.value.id)
@@ -361,7 +613,11 @@ const loadTab = async (name: string | number) => {
         storageEndpoint: String(data.storageConfig.endpoint || ''),
         bucket: String(data.storageConfig.bucket || ''),
         trainingEndpoint: String(data.providerConfig.trainingEndpoint || ''),
-        credentialRef: data.secretRefs.providerCredential || ''
+        credentialRef: data.secretRefs.providerCredential || '',
+        cvatInstanceId: Number(data.providerConfig.cvatInstanceId) || undefined,
+        clearmlInstanceId: Number(data.providerConfig.clearmlInstanceId) || undefined,
+        fiftyOneInstanceId: Number(data.providerConfig.fiftyOneInstanceId) || undefined,
+        defaultQueue: String(data.providerConfig.defaultQueue || 'gpu-local')
       })
     }
   } finally {
@@ -369,17 +625,22 @@ const loadTab = async (name: string | number) => {
   }
 }
 
+const openMemberDialog = () => {
+  memberForm.userId = availableMemberUsers.value[0]?.id
+  memberVisible.value = true
+}
+
 const saveMember = async () => {
-  if (!selected.value || !memberForm.roles.length) {
-    message.warning('请选择至少一个项目角色')
+  if (!selected.value || !memberForm.userId) {
+    message.warning('请选择项目成员')
     return
   }
   saving.value = true
   try {
-    await upsertProjectMember(selected.value.id, memberForm)
+    await upsertProjectMember(selected.value.id, { userId: memberForm.userId })
     memberVisible.value = false
     await loadTab('members')
-    message.success('成员角色已生效')
+    message.success('项目成员已添加，权限继承系统角色')
   } finally {
     saving.value = false
   }
@@ -394,20 +655,58 @@ const deleteMember = async (userId: number) => {
 
 const saveConfig = async () => {
   if (!selected.value) return
+  if (!configForm.changeReason) return message.warning('配置变更原因必填')
   saving.value = true
   try {
     await updateProjectConfig(selected.value.id, {
       storageConfig: { endpoint: configForm.storageEndpoint, bucket: configForm.bucket },
-      providerConfig: { trainingEndpoint: configForm.trainingEndpoint },
-      secretRefs: { providerCredential: configForm.credentialRef }
+      providerConfig: {
+        trainingEndpoint: configForm.trainingEndpoint,
+        cvatInstanceId: configForm.cvatInstanceId,
+        clearmlInstanceId: configForm.clearmlInstanceId,
+        fiftyOneInstanceId: configForm.fiftyOneInstanceId,
+        defaultQueue: configForm.defaultQueue
+      },
+      secretRefs: { providerCredential: configForm.credentialRef },
+      changeReason: configForm.changeReason
     })
+    configForm.changeReason = ''
     message.success('Provider 配置已保存')
   } finally {
     saving.value = false
   }
 }
 
-onMounted(loadProjects)
+const testSelectedProviders = async () => {
+  const ids = [
+    configForm.cvatInstanceId,
+    configForm.clearmlInstanceId,
+    configForm.fiftyOneInstanceId
+  ].filter((id): id is number => Boolean(id))
+  if (!ids.length) {
+    message.warning('请至少选择一个外部实例')
+    return
+  }
+  saving.value = true
+  try {
+    await Promise.all(ids.map((id) => testIntegration(id)))
+    message.success(`${ids.length} 个 Provider 的网络、健康 API 与认证响应均通过`)
+    const data = await getIntegrations()
+    integrations.value = data.instances
+  } finally {
+    saving.value = false
+  }
+}
+
+onMounted(async () => {
+  const [, systemUsers, operationData] = await Promise.all([
+    loadProjects(),
+    getSimpleUserList(),
+    getIntegrations()
+  ])
+  users.value = systemUsers
+  integrations.value = operationData.instances
+})
 </script>
 
 <style scoped lang="scss">
@@ -548,6 +847,21 @@ onMounted(loadProjects)
   place-items: center;
 }
 
+.member-account {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-tertiary);
+}
+
+.empty-role {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.member-user-field {
+  margin-top: var(--space-4);
+}
+
 .empty-card {
   display: grid;
   color: var(--text-tertiary);
@@ -603,6 +917,118 @@ onMounted(loadProjects)
   }
 }
 
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.quota-grid :deep(.el-input-number) {
+  width: 100%;
+}
+
+.project-overview {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.overview-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+
+  article {
+    display: grid;
+    min-height: 88px;
+    padding: var(--space-4);
+    background: var(--bg-canvas);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    align-content: center;
+    gap: var(--space-1);
+  }
+
+  span {
+    font-size: 12px;
+    color: var(--text-tertiary);
+  }
+
+  strong {
+    font-size: 24px;
+  }
+}
+
+.overview-section {
+  padding: var(--space-4);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+
+  > header {
+    display: flex;
+    margin-bottom: var(--space-3);
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
+
+  h3 {
+    margin: 0 0 2px;
+    font-size: 16px;
+  }
+
+  p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-tertiary);
+  }
+}
+
+.risk-row {
+  display: grid;
+  width: 100%;
+  padding: 10px 0;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--divider);
+  cursor: pointer;
+  grid-template-columns: 72px 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.empty-copy {
+  padding: var(--space-3) 0;
+}
+
+.timeline-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  gap: var(--space-3);
+
+  li {
+    display: grid;
+    grid-template-columns: 12px 1fr auto;
+    align-items: start;
+    gap: var(--space-2);
+  }
+
+  time {
+    font-size: 11px;
+    color: var(--text-tertiary);
+  }
+}
+
+.timeline-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  background: var(--primary);
+  border-radius: 50%;
+}
+
 .tab-header {
   justify-content: space-between;
   margin-bottom: var(--space-3);
@@ -619,6 +1045,12 @@ onMounted(loadProjects)
 .config-form {
   max-width: 560px;
   margin-top: var(--space-5);
+}
+
+.config-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
 }
 
 .full-width {
@@ -644,6 +1076,11 @@ onMounted(loadProjects)
   }
 
   .project-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-grid,
+  .overview-metrics {
     grid-template-columns: 1fr;
   }
 }

@@ -36,12 +36,14 @@ type AssetCollectionItem struct {
 }
 
 type AssetTag struct {
-	ID        uint64    `gorm:"primaryKey" json:"id"`
-	TenantID  uint64    `gorm:"index;not null" json:"tenantId"`
-	ProjectID uint64    `gorm:"index;not null" json:"projectId"`
-	AssetID   uint64    `gorm:"uniqueIndex:uk_asset_tag;not null" json:"assetId"`
-	Tag       string    `gorm:"size:64;uniqueIndex:uk_asset_tag;not null" json:"tag"`
-	CreatedAt time.Time `json:"createTime"`
+	ID           uint64    `gorm:"primaryKey" json:"id"`
+	TenantID     uint64    `gorm:"index;not null" json:"tenantId"`
+	ProjectID    uint64    `gorm:"index;not null" json:"projectId"`
+	AssetID      uint64    `gorm:"uniqueIndex:uk_asset_tag;not null" json:"assetId"`
+	DefinitionID uint64    `gorm:"index" json:"definitionId"`
+	Category     string    `gorm:"size:16;index" json:"category"`
+	Tag          string    `gorm:"size:64;uniqueIndex:uk_asset_tag;not null" json:"tag"`
+	CreatedAt    time.Time `json:"createTime"`
 }
 
 func (AssetCollection) TableName() string     { return "ai_asset_collection" }
@@ -59,7 +61,7 @@ type collectionAssetsRequest struct {
 }
 
 type assetTagsRequest struct {
-	Tags []string `json:"tags"`
+	DefinitionIDs []uint64 `json:"definitionIds"`
 }
 
 func (h *Handler) getCollection(c *gin.Context, project Project) (AssetCollection, bool) {
@@ -118,12 +120,85 @@ func (h *Handler) CollectionCreate(c *gin.Context) {
 		Description: strings.TrimSpace(req.Description), Filter: string(filter), Version: 1,
 		CreatedBy: c.GetUint64("user_id"),
 	}
-	if err := h.db.Create(&row).Error; err != nil {
+	filteredAssetIDs := make([]uint64, 0)
+	if len(req.Filter) > 0 {
+		query := h.db.Model(&Asset{}).Where("tenant_id = ? AND project_id = ?", project.TenantID, project.ID)
+		status, _ := req.Filter["status"].(string)
+		if strings.TrimSpace(status) == "" {
+			status = string(AssetReady)
+		}
+		query = query.Where("status = ?", status)
+		if keyword, _ := req.Filter["keyword"].(string); strings.TrimSpace(keyword) != "" {
+			query = query.Where("filename LIKE ? OR sha256 LIKE ?", "%"+strings.TrimSpace(keyword)+"%", strings.TrimSpace(keyword)+"%")
+		}
+		tagIDs := numericIDs(req.Filter["tagDefinitionIds"])
+		if len(tagIDs) > 0 {
+			query = query.Where(`id IN (
+				SELECT asset_id FROM ai_asset_tag
+				WHERE tenant_id = ? AND project_id = ? AND definition_id IN ?
+				GROUP BY asset_id HAVING COUNT(DISTINCT definition_id) = ?
+			)`, project.TenantID, project.ID, tagIDs, len(tagIDs))
+		}
+		if err := query.Order("id").Pluck("id", &filteredAssetIDs).Error; err != nil {
+			httpx.Fail(c, 500, 500, "筛选资产失败")
+			return
+		}
+	}
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		if len(filteredAssetIDs) > 0 {
+			items := make([]AssetCollectionItem, 0, len(filteredAssetIDs))
+			for _, assetID := range filteredAssetIDs {
+				items = append(items, AssetCollectionItem{
+					TenantID: project.TenantID, ProjectID: project.ID, CollectionID: row.ID, AssetID: assetID,
+				})
+			}
+			if err := tx.CreateInBatches(items, 500).Error; err != nil {
+				return err
+			}
+		}
+		return appendAudit(tx, c, project.ID, "ASSET_COLLECTION_CREATED", "ASSET_COLLECTION", row.ID, nil, gin.H{
+			"collection": row, "filteredAssetCount": len(filteredAssetIDs),
+		})
+	}); err != nil {
 		httpx.Fail(c, 500, 500, "资产集合创建失败")
 		return
 	}
-	_ = appendAudit(h.db, c, project.ID, "ASSET_COLLECTION_CREATED", "ASSET_COLLECTION", row.ID, nil, row)
 	httpx.OK(c, row)
+}
+
+func numericIDs(value any) []uint64 {
+	result, seen := make([]uint64, 0), map[uint64]bool{}
+	appendID := func(id uint64) {
+		if id > 0 && !seen[id] {
+			seen[id] = true
+			result = append(result, id)
+		}
+	}
+	switch values := value.(type) {
+	case []any:
+		for _, item := range values {
+			switch typed := item.(type) {
+			case float64:
+				appendID(uint64(typed))
+			case string:
+				id, _ := strconv.ParseUint(strings.TrimSpace(typed), 10, 64)
+				appendID(id)
+			}
+		}
+	case []uint64:
+		for _, id := range values {
+			appendID(id)
+		}
+	case string:
+		for _, item := range strings.Split(values, ",") {
+			id, _ := strconv.ParseUint(strings.TrimSpace(item), 10, 64)
+			appendID(id)
+		}
+	}
+	return result
 }
 
 // CollectionAddAssets godoc
@@ -221,6 +296,49 @@ func (h *Handler) CollectionFreeze(c *gin.Context) {
 	httpx.OK(c, collection)
 }
 
+// CollectionAssetsPage godoc
+// @Summary Page assets inside a collection
+// @Tags VisionAI Asset
+// @Security BearerAuth
+// @Success 200 {object} httpx.Response
+// @Router /ai-platform/projects/{id}/collections/{collectionId}/assets [get]
+func (h *Handler) CollectionAssetsPage(c *gin.Context) {
+	project, ok := h.projectAccess(c, false)
+	if !ok {
+		return
+	}
+	collection, ok := h.getCollection(c, project)
+	if !ok {
+		return
+	}
+	query := h.db.Model(&Asset{}).
+		Joins("JOIN ai_asset_collection_item i ON i.asset_id = ai_asset.id AND i.collection_id = ?", collection.ID).
+		Where("ai_asset.tenant_id = ? AND ai_asset.project_id = ?", project.TenantID, project.ID)
+	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
+		query = query.Where("ai_asset.filename LIKE ? OR ai_asset.sha256 LIKE ?", "%"+keyword+"%", keyword+"%")
+	}
+	var total int64
+	query.Count(&total)
+	pageNo, pageSize := page(c)
+	var rows []Asset
+	query.Order("ai_asset.id DESC").Offset((pageNo - 1) * pageSize).Limit(pageSize).Find(&rows)
+	type assetView struct {
+		Asset
+		ThumbnailURL string `json:"thumbnailUrl"`
+	}
+	result := make([]assetView, 0, len(rows))
+	for _, row := range rows {
+		view := assetView{Asset: row}
+		if h.storage != nil && row.ThumbnailObjectKey != "" {
+			if signed, err := h.storage.PresignedGet(c.Request.Context(), row.ThumbnailObjectKey, 10*time.Minute); err == nil {
+				view.ThumbnailURL = signed.String()
+			}
+		}
+		result = append(result, view)
+	}
+	httpx.OK(c, gin.H{"collection": collection, "list": result, "total": total})
+}
+
 // AssetTagsUpdate godoc
 // @Summary Replace asset tags
 // @Tags VisionAI Asset
@@ -237,34 +355,24 @@ func (h *Handler) AssetTagsUpdate(c *gin.Context) {
 		return
 	}
 	var req assetTagsRequest
-	if c.ShouldBindJSON(&req) != nil || len(req.Tags) > 50 {
-		httpx.Fail(c, 400, 400, "标签格式错误或超过 50 个")
+	if c.ShouldBindJSON(&req) != nil || len(req.DefinitionIDs) > 50 {
+		httpx.Fail(c, 400, 400, "标签定义格式错误或超过 50 个")
 		return
 	}
-	clean := make([]string, 0, len(req.Tags))
-	seen := map[string]bool{}
-	for _, tag := range req.Tags {
-		tag = strings.TrimSpace(tag)
-		if tag == "" || len(tag) > 64 || seen[tag] {
-			continue
-		}
-		seen[tag] = true
-		clean = append(clean, tag)
+	definitions, err := loadTagDefinitions(h.db, project, req.DefinitionIDs, true)
+	if err != nil {
+		httpx.Fail(c, 409, 409, "标签定义不存在、跨项目或已停用")
+		return
 	}
-	err := h.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("tenant_id = ? AND asset_id = ?", project.TenantID, asset.ID).Delete(&AssetTag{}).Error; err != nil {
+	err = h.db.Transaction(func(tx *gorm.DB) error {
+		if err := replaceAssetTags(tx, project, []uint64{asset.ID}, definitions, "REPLACE"); err != nil {
 			return err
 		}
-		for _, tag := range clean {
-			if err := tx.Create(&AssetTag{TenantID: project.TenantID, ProjectID: project.ID, AssetID: asset.ID, Tag: tag}).Error; err != nil {
-				return err
-			}
-		}
-		return appendAudit(tx, c, project.ID, "ASSET_TAGS_UPDATED", "ASSET", asset.ID, nil, gin.H{"tags": clean})
+		return appendAudit(tx, c, project.ID, "ASSET_TAGS_UPDATED", "ASSET", asset.ID, nil, gin.H{"definitionIds": req.DefinitionIDs})
 	})
 	if err != nil {
 		httpx.Fail(c, 500, 500, "资产标签保存失败")
 		return
 	}
-	httpx.OK(c, clean)
+	httpx.OK(c, assetTagViews(h.db, project, []uint64{asset.ID})[asset.ID])
 }

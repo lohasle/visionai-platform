@@ -22,7 +22,9 @@ export interface DatasetVersion {
   sourceType: string
   sourceId: number
   annotationRevisionId: number
+  ontologyVersionId: number
   ontologyVersion: string
+  ontologyChecksum: string
   splitSeed: number
   status: DatasetVersionStatus
   itemCount: number
@@ -64,10 +66,14 @@ export const createDatasetVersion = (
   data: {
     sourceType: string
     sourceId: number
+    parentId: number
     annotationRevisionId: number
-    ontologyVersion: string
+    ontologyVersionId: number
+    splitMode: string
     splitSeed: number
     split: Record<string, number>
+    splitRules: Array<{ field: string; operator: string; value: string; split: string }>
+    externalAssignments: Record<string, string>
   }
 ) =>
   request.post<DatasetVersion>({

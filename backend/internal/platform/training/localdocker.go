@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type LocalDockerSpec struct {
@@ -17,6 +18,7 @@ type LocalDockerSpec struct {
 	ImageRef           string
 	Entrypoint         string
 	OutputDir          string
+	InputDir           string
 	DatasetManifestURI string
 	ParametersJSON     string
 	GPUCount           int
@@ -54,25 +56,23 @@ func (p LocalDocker) Run(ctx context.Context, spec LocalDockerSpec) (ResultManif
 	if strings.TrimSpace(spec.ImageRef) == "" || spec.RunID == 0 {
 		return ResultManifest{}, nil, errors.New("invalid LocalDocker training spec")
 	}
-	outputDir, err := filepath.Abs(spec.OutputDir)
+	outputDir, err := PrepareOutputDirectory(spec.OutputDir)
 	if err != nil {
 		return ResultManifest{}, nil, err
 	}
-	if err = os.MkdirAll(outputDir, 0o750); err != nil {
-		return ResultManifest{}, nil, err
-	}
-	// MkdirAll can create the per-feature parent (for example
-	// /training-work/template-smoke) with mode 0750. The trainer's fixed UID
-	// needs execute permission on that parent before it can reach the
-	// deliberately world-writable per-run directory below.
-	if err = os.Chmod(filepath.Dir(outputDir), 0o755); err != nil {
-		return ResultManifest{}, nil, err
-	}
-	// The container runs as an unprivileged fixed UID. The per-run directory
-	// contains only generated artifacts and must be writable across host UID
-	// mappings (Linux, WSL2, and Docker Desktop).
-	if err = os.Chmod(outputDir, 0o777); err != nil {
-		return ResultManifest{}, nil, err
+	inputTarget := ""
+	if strings.TrimSpace(spec.InputDir) != "" {
+		inputDir, inputErr := filepath.Abs(spec.InputDir)
+		if inputErr != nil {
+			return ResultManifest{}, nil, inputErr
+		}
+		if info, statErr := os.Stat(inputDir); statErr != nil || !info.IsDir() {
+			return ResultManifest{}, nil, errors.New("training input directory is unavailable")
+		}
+		inputTarget = "/input"
+		if strings.TrimSpace(p.VolumesFrom) != "" {
+			inputTarget = inputDir
+		}
 	}
 	binary := strings.TrimSpace(p.Binary)
 	if binary == "" {
@@ -89,6 +89,9 @@ func (p LocalDocker) Run(ctx context.Context, spec LocalDockerSpec) (ResultManif
 		outputTarget = outputDir
 	} else {
 		args = append(args, "--mount", "type=bind,src="+outputDir+",dst=/output")
+		if inputTarget != "" {
+			args = append(args, "--mount", "type=bind,src="+spec.InputDir+",dst=/input,readonly")
+		}
 	}
 	args = append(args,
 		"--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
@@ -97,6 +100,9 @@ func (p LocalDocker) Run(ctx context.Context, spec LocalDockerSpec) (ResultManif
 		"-e", "VISIONAI_DATASET_MANIFEST_URI="+spec.DatasetManifestURI,
 		"-e", "VISIONAI_PARAMETERS_JSON="+spec.ParametersJSON,
 	)
+	if inputTarget != "" {
+		args = append(args, "-e", "VISIONAI_INPUT_DIR="+inputTarget)
+	}
 	if spec.MemoryBytes > 0 {
 		args = append(args, "--memory", strconv.FormatInt(spec.MemoryBytes, 10))
 	}
@@ -111,35 +117,77 @@ func (p LocalDocker) Run(ctx context.Context, spec LocalDockerSpec) (ResultManif
 		args = append(args, strings.Fields(entrypoint)...)
 	}
 	command := exec.CommandContext(ctx, binary, args...)
+	containerName := "visionai-training-" + strconv.FormatUint(spec.RunID, 10)
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = exec.CommandContext(cleanupCtx, binary, "rm", "-f", containerName).Run()
+	}()
 	log, runErr := command.CombinedOutput()
 	if runErr != nil {
 		return ResultManifest{}, log, fmt.Errorf("LocalDocker training failed: %w", runErr)
 	}
-	manifestPath := filepath.Join(outputDir, "result-manifest.json")
-	raw, err := os.ReadFile(manifestPath)
+	manifest, err := ReadResultManifest(outputDir)
+	return manifest, log, err
+}
+
+// PrepareOutputDirectory creates a portable output directory for a fixed,
+// unprivileged trainer UID. It is shared by synchronous LocalDocker execution
+// and asynchronous ClearML Agent execution.
+func PrepareOutputDirectory(value string) (string, error) {
+	outputDir, err := filepath.Abs(value)
 	if err != nil {
-		return ResultManifest{}, log, fmt.Errorf("result-manifest missing: %w", err)
+		return "", err
+	}
+	if err = os.MkdirAll(outputDir, 0o750); err != nil {
+		return "", err
+	}
+	// MkdirAll can create the per-feature parent (for example
+	// /training-work/template-smoke) with mode 0750. The trainer's fixed UID
+	// needs execute permission on that parent before it can reach the
+	// deliberately world-writable per-run directory below.
+	if err = os.Chmod(filepath.Dir(outputDir), 0o755); err != nil {
+		return "", err
+	}
+	// The per-run directory contains only generated artifacts and must be
+	// writable across Linux, WSL2, and Docker Desktop UID mappings.
+	if err = os.Chmod(outputDir, 0o777); err != nil {
+		return "", err
+	}
+	return outputDir, nil
+}
+
+// ReadResultManifest validates the framework-neutral result contract and every
+// referenced artifact before callers persist any result.
+func ReadResultManifest(outputDir string) (ResultManifest, error) {
+	outputDir, err := filepath.Abs(outputDir)
+	if err != nil {
+		return ResultManifest{}, err
+	}
+	raw, err := os.ReadFile(filepath.Join(outputDir, "result-manifest.json"))
+	if err != nil {
+		return ResultManifest{}, fmt.Errorf("result-manifest missing: %w", err)
 	}
 	var manifest ResultManifest
 	if err = json.Unmarshal(raw, &manifest); err != nil {
-		return ResultManifest{}, log, fmt.Errorf("invalid result-manifest: %w", err)
+		return ResultManifest{}, fmt.Errorf("invalid result-manifest: %w", err)
 	}
 	if manifest.SchemaVersion != "visionai.result-manifest.v1" || manifest.Status != "SUCCEEDED" {
-		return ResultManifest{}, log, errors.New("unsupported or unsuccessful result-manifest")
+		return ResultManifest{}, errors.New("unsupported or unsuccessful result-manifest")
 	}
 	for _, artifact := range manifest.Artifacts {
 		clean := filepath.Clean(filepath.FromSlash(artifact.Path))
 		if filepath.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-			return ResultManifest{}, log, errors.New("result-manifest contains unsafe artifact path")
+			return ResultManifest{}, errors.New("result-manifest contains unsafe artifact path")
 		}
 		resolved := filepath.Join(outputDir, clean)
 		relative, relErr := filepath.Rel(outputDir, resolved)
 		if relErr != nil || strings.HasPrefix(relative, "..") {
-			return ResultManifest{}, log, errors.New("artifact escapes output directory")
+			return ResultManifest{}, errors.New("artifact escapes output directory")
 		}
 		if info, statErr := os.Stat(resolved); statErr != nil || !info.Mode().IsRegular() {
-			return ResultManifest{}, log, fmt.Errorf("artifact missing: %s", artifact.Path)
+			return ResultManifest{}, fmt.Errorf("artifact missing: %s", artifact.Path)
 		}
 	}
-	return manifest, log, nil
+	return manifest, nil
 }

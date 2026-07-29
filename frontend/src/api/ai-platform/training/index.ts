@@ -17,6 +17,13 @@ export interface TrainingTemplateVersion {
   semanticVersion: string
   trainer: string
   imageRef: string
+  entrypoint: string
+  parameterSchema: string
+  resourceRequirements: string
+  compatibility: string
+  licensePolicy: string
+  sourceYaml: string
+  sourceYamlSha256: string
   outputProtocol: string
   published: boolean
   smokeStatus: 'PENDING' | 'PASSED' | 'FAILED'
@@ -110,10 +117,10 @@ export const publishTrainingTemplateVersion = (projectId: number, versionId: num
     url: `/ai-platform/projects/${projectId}/training-template-versions/${versionId}/publish`
   })
 
-export const getTrainingRuns = (projectId: number) =>
+export const getTrainingRuns = (projectId: number, filters: Record<string, unknown> = {}) =>
   request.get<{ list: TrainingRun[]; total: number }>({
     url: `/ai-platform/projects/${projectId}/training-runs`,
-    params: { pageNo: 1, pageSize: 100 }
+    params: { pageNo: 1, pageSize: 100, ...filters }
   })
 
 export const createTrainingRun = (projectId: number, data: Record<string, unknown>) =>

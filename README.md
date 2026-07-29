@@ -27,6 +27,7 @@ Windows PowerShell 也可执行：
 - 账号：`admin / admin123`
 - Swagger：http://localhost:58080/swagger/index.html
 - CVAT：http://localhost:28080（`visionai / visionai_cvat_dev`）
+- ClearML：http://localhost:8080（`visionai / visionai_clearml_dev`）
 - FiftyOne：http://localhost:25151
 - MinIO Console：http://localhost:29001（`visionai / visionai_minio_dev`）
 - 推理 API：http://localhost:28000/docs
@@ -46,9 +47,10 @@ Windows：
 .\scripts\doctor.ps1
 .\scripts\e2e.ps1
 .\scripts\e2e-coco128.ps1
+.\scripts\e2e-supply-chain.ps1
 ```
 
-`e2e-coco128.ps1` 会下载公开 COCO128 数据集，并重放资产导入、CVAT 标注、数据集冻结、训练、FiftyOne 评估、模型审批、部署推理与反馈返标完整链路。
+`e2e-coco128.ps1` 会下载公开 COCO128 数据集，并重放资产导入、CVAT 标注、数据集冻结、训练、FiftyOne 评估、模型审批、部署推理与反馈返标完整链路。`e2e-supply-chain.ps1` 额外验证项目模板复制、四类许可、多人顺序审批、受控输入变更失效、模型导出审计，以及集成升级与故障自动回滚。
 
 GPU 可选栈：
 
@@ -63,12 +65,12 @@ docker compose -f compose.yaml -f compose.gpu.yaml --profile inference-gpu --pro
 - 图片/视频资产、分片上传、批量导入、质量检测、集合冻结
 - CVAT 标注、预标注、复核、导出与不可变修订
 - 数据集 Manifest、训练/验证/测试拆分、校验、冻结和追溯
-- 训练模板、Smoke Test、LocalDocker/ClearML Provider、实验对比
+- 训练模板、Smoke Test、LocalDocker/ClearML Provider、CPU/GPU 队列与实验对比
 - FiftyOne 评估工作台、困难样本切片、基线回归门禁
-- 模型卡、制品哈希、供应链证据、四眼审批
+- 模型卡、制品哈希、四类许可/用途声明、租户多级审批、受控变更失效与导出审计
 - 不可变部署修订、图片/视频推理、监控告警、回滚与重启
 - 低置信度/空结果/错误反馈采集、去重、回流 CVAT 与再训练谱系
-- GPU 节点、队列、项目配额、集成健康、兼容矩阵和审计导出
+- GPU 节点、队列、项目配额、集成健康、兼容矩阵、配置修订、升级冒烟与自动回滚
 
 完整说明见 [产品手册](docs/产品手册.md)，测试证据见 [验收测试报告](docs/验收测试报告.md)，需求追踪见 [SPEC 索引](docs/specs/README.md)。
 

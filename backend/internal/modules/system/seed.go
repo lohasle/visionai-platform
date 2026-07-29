@@ -19,6 +19,49 @@ type menuSeed struct {
 	Permissions   []string
 }
 
+type VisionAIRoleDefinition struct {
+	Name string
+	Code string
+	Sort int
+}
+
+var VisionAIRoleDefinitions = []VisionAIRoleDefinition{
+	{Name: "项目负责人", Code: "PROJECT_OWNER", Sort: 100},
+	{Name: "数据管理员", Code: "DATA_MANAGER", Sort: 110},
+	{Name: "标注员", Code: "ANNOTATOR", Sort: 120},
+	{Name: "审核员", Code: "REVIEWER", Sort: 130},
+	{Name: "算法工程师", Code: "ALGORITHM_ENGINEER", Sort: 140},
+	{Name: "模型审批人", Code: "APPROVER", Sort: 150},
+	{Name: "平台运维", Code: "OPS", Sort: 160},
+	{Name: "审计员", Code: "AUDITOR", Sort: 170},
+}
+
+func ensureVisionAIRolesForTenant(db *gorm.DB, tenantID uint64) error {
+	for _, definition := range VisionAIRoleDefinitions {
+		role := Role{TenantID: tenantID, Code: definition.Code}
+		if err := db.Where("tenant_id = ? AND code = ?", tenantID, definition.Code).Attrs(Role{
+			Name: definition.Name, Sort: definition.Sort, Status: 0, Type: 1, DataScope: 1,
+			DataScopeDeptIDs: "[]", Remark: "VisionAI 内置业务角色，在系统管理中统一分配",
+		}).FirstOrCreate(&role).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func EnsureVisionAIRoles(db *gorm.DB) error {
+	var tenantIDs []uint64
+	if err := db.Model(&Tenant{}).Order("id").Pluck("id", &tenantIDs).Error; err != nil {
+		return err
+	}
+	for _, tenantID := range tenantIDs {
+		if err := ensureVisionAIRolesForTenant(db, tenantID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func SeedBase(db *gorm.DB) error {
 	groups := []SystemMenu{
 		{ID: 1, Name: "系统管理", Type: 1, Sort: 10, ParentID: 0, Path: "/system", Icon: "ep:tools", Status: 0, Visible: true, KeepAlive: true, AlwaysShow: true},
@@ -58,14 +101,16 @@ func SeedBase(db *gorm.DB) error {
 		{501, 5, "工作台", "dashboard", "lucide:layout-dashboard", "ai-platform/dashboard/index", "VisionAIDashboard", 1, []string{"ai-platform:dashboard:query", "ai-platform:job:query", "ai-platform:job:cancel", "ai-platform:job:retry"}},
 		{502, 5, "项目中心", "projects", "lucide:folder-kanban", "ai-platform/projects/index", "VisionAIProjects", 2, []string{"ai-platform:project:query", "ai-platform:project:create", "ai-platform:project:update", "ai-platform:project:archive", "ai-platform:project:member", "ai-platform:project:config"}},
 		{503, 5, "数据资产", "assets", "lucide:images", "ai-platform/assets/index", "VisionAIAssets", 3, []string{"ai-platform:asset:query", "ai-platform:asset:upload", "ai-platform:asset:import", "ai-platform:asset:update", "ai-platform:asset:delete"}},
-		{504, 5, "标注任务", "annotations", "lucide:scan-search", "ai-platform/annotations/index", "VisionAIAnnotations", 4, []string{"ai-platform:annotation:query", "ai-platform:annotation:create", "ai-platform:annotation:prepare", "ai-platform:annotation:review", "ai-platform:annotation:export", "ai-platform:annotation:mapping"}},
-		{505, 5, "数据集注册表", "datasets", "lucide:database-zap", "ai-platform/datasets/index", "VisionAIDatasets", 5, []string{"ai-platform:dataset:query", "ai-platform:dataset:create", "ai-platform:dataset:validate", "ai-platform:dataset:freeze", "ai-platform:dataset:deprecate"}},
-		{506, 5, "训练与实验", "training", "lucide:brain-circuit", "ai-platform/training/index", "VisionAITraining", 6, []string{"ai-platform:training:query", "ai-platform:training:template", "ai-platform:training:smoke", "ai-platform:training:publish", "ai-platform:training:create", "ai-platform:training:cancel", "ai-platform:training:clone"}},
-		{507, 5, "评估与困难样本", "evaluation", "lucide:scan-line", "ai-platform/evaluation/index", "VisionAIEvaluation", 7, []string{"ai-platform:evaluation:query", "ai-platform:evaluation:create", "ai-platform:evaluation:workbench", "ai-platform:evaluation:hard-sample"}},
-		{508, 5, "模型注册与审批", "models", "lucide:badge-check", "ai-platform/models/index", "VisionAIModelRegistry", 8, []string{"ai-platform:model:query", "ai-platform:model:register", "ai-platform:model:approve", "ai-platform:model:export"}},
-		{509, 5, "部署与监控", "deployments", "lucide:activity", "ai-platform/deployments/index", "VisionAIDeployments", 9, []string{"ai-platform:deployment:query", "ai-platform:deployment:create", "ai-platform:deployment:operate", "ai-platform:inference:test", "ai-platform:monitor:query"}},
-		{510, 5, "生产反馈闭环", "feedback", "lucide:refresh-cw", "ai-platform/feedback/index", "VisionAIFeedback", 10, []string{"ai-platform:feedback:query", "ai-platform:feedback:policy", "ai-platform:feedback:review", "ai-platform:feedback:cleanup"}},
-		{511, 5, "资源与集成", "operations", "lucide:server-cog", "ai-platform/operations/index", "VisionAIOperations", 11, []string{"ai-platform:resource:query", "ai-platform:resource:update", "ai-platform:integration:query", "ai-platform:integration:update", "ai-platform:audit:query", "ai-platform:audit:export"}},
+		{513, 5, "标签与类别", "ontology", "lucide:tags", "ai-platform/ontology/index", "VisionAIOntology", 4, []string{"ai-platform:ontology:query", "ai-platform:ontology:create", "ai-platform:ontology:update", "ai-platform:ontology:publish", "ai-platform:asset-tag:query", "ai-platform:asset-tag:update"}},
+		{512, 5, "资产集合", "collections", "lucide:layers", "ai-platform/collections/index", "VisionAICollections", 5, []string{"ai-platform:collection:query", "ai-platform:collection:create", "ai-platform:collection:update", "ai-platform:collection:freeze"}},
+		{504, 5, "标注任务", "annotations", "lucide:scan-search", "ai-platform/annotations/index", "VisionAIAnnotations", 6, []string{"ai-platform:annotation:query", "ai-platform:annotation:create", "ai-platform:annotation:prepare", "ai-platform:annotation:review", "ai-platform:annotation:export", "ai-platform:annotation:mapping"}},
+		{505, 5, "数据集注册表", "datasets", "lucide:database-zap", "ai-platform/datasets/index", "VisionAIDatasets", 7, []string{"ai-platform:dataset:query", "ai-platform:dataset:create", "ai-platform:dataset:validate", "ai-platform:dataset:freeze", "ai-platform:dataset:deprecate"}},
+		{506, 5, "训练与实验", "training", "lucide:brain-circuit", "ai-platform/training/index", "VisionAITraining", 8, []string{"ai-platform:training:query", "ai-platform:training:template", "ai-platform:training:smoke", "ai-platform:training:publish", "ai-platform:training:create", "ai-platform:training:cancel", "ai-platform:training:clone"}},
+		{507, 5, "评估与困难样本", "evaluation", "lucide:scan-line", "ai-platform/evaluation/index", "VisionAIEvaluation", 9, []string{"ai-platform:evaluation:query", "ai-platform:evaluation:create", "ai-platform:evaluation:workbench", "ai-platform:evaluation:hard-sample"}},
+		{508, 5, "模型注册与审批", "models", "lucide:badge-check", "ai-platform/models/index", "VisionAIModelRegistry", 10, []string{"ai-platform:model:query", "ai-platform:model:register", "ai-platform:model:approve", "ai-platform:model:export"}},
+		{509, 5, "部署与监控", "deployments", "lucide:activity", "ai-platform/deployments/index", "VisionAIDeployments", 11, []string{"ai-platform:deployment:query", "ai-platform:deployment:create", "ai-platform:deployment:operate", "ai-platform:inference:test", "ai-platform:monitor:query"}},
+		{510, 5, "生产反馈闭环", "feedback", "lucide:refresh-cw", "ai-platform/feedback/index", "VisionAIFeedback", 12, []string{"ai-platform:feedback:query", "ai-platform:feedback:policy", "ai-platform:feedback:review", "ai-platform:feedback:cleanup"}},
+		{511, 5, "资源与集成", "operations", "lucide:server-cog", "ai-platform/operations/index", "VisionAIOperations", 13, []string{"ai-platform:resource:query", "ai-platform:resource:update", "ai-platform:integration:query", "ai-platform:integration:update", "ai-platform:audit:query", "ai-platform:audit:export"}},
 	}
 	for _, group := range groups {
 		if err := upsertMenu(db, group); err != nil {
@@ -107,7 +152,10 @@ func SeedBase(db *gorm.DB) error {
 	if err := db.Where("name = ?", pack.Name).Assign(pack).FirstOrCreate(&pack).Error; err != nil {
 		return err
 	}
-	return db.Model(&Tenant{}).Where("package_id = 0").Update("package_id", pack.ID).Error
+	if err := db.Model(&Tenant{}).Where("package_id = 0").Update("package_id", pack.ID).Error; err != nil {
+		return err
+	}
+	return EnsureVisionAIRoles(db)
 }
 
 func deleteMenuTrees(db *gorm.DB, roots []uint64) error {

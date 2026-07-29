@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lohasle/nimbus-framework-go/internal/modules/system"
 	"github.com/lohasle/nimbus-framework-go/internal/modules/visionai"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/config"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/database"
@@ -31,6 +32,8 @@ func main() {
 		slog.Error("database initialization stopped", "error", err)
 		return
 	}
+	go sampleLocalResources(ctx, db, cfg)
+	go syncExternalAnnotations(ctx, db, cfg)
 	for ctx.Err() == nil {
 		if err = consume(ctx, db, cfg); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Warn("orchestrator consumer disconnected", "error", err)
@@ -38,6 +41,53 @@ func main() {
 		select {
 		case <-ctx.Done():
 		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+func syncExternalAnnotations(ctx context.Context, db *gorm.DB, cfg config.Config) {
+	sync := func() {
+		if err := visionai.SyncActiveAnnotationTasks(ctx, db, cfg); err != nil &&
+			!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			slog.Warn("scheduled CVAT annotation sync failed", "error", err)
+		}
+	}
+	sync()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sync()
+		}
+	}
+}
+
+func sampleLocalResources(ctx context.Context, db *gorm.DB, cfg config.Config) {
+	sample := func() {
+		var tenantIDs []uint64
+		if err := db.Model(&system.Tenant{}).Where("status = ?", 0).Pluck("id", &tenantIDs).Error; err != nil {
+			slog.Warn("resource sampler could not list tenants", "error", err)
+			return
+		}
+		for _, tenantID := range tenantIDs {
+			if err := visionai.SampleLocalDockerGPU(ctx, db, tenantID, cfg); err != nil &&
+				!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				slog.Warn("local GPU resource sample failed", "tenantId", tenantID, "error", err)
+			}
+		}
+	}
+	sample()
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sample()
 		}
 	}
 }

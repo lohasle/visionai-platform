@@ -1,20 +1,20 @@
 package visionai
 
 import (
-	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/goccy/go-yaml"
 	"github.com/google/uuid"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/config"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/httpx"
-	platformtraining "github.com/lohasle/nimbus-framework-go/internal/platform/training"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -34,6 +34,32 @@ type trainingTemplateVersionRequest struct {
 	ResourceRequirements map[string]any `json:"resourceRequirements"`
 	Compatibility        map[string]any `json:"compatibility"`
 	LicensePolicy        map[string]any `json:"licensePolicy"`
+	AdvancedYAML         string         `json:"advancedYaml"`
+}
+
+type trainingTemplateYAML struct {
+	Trainer              string         `yaml:"trainer"`
+	ImageRef             string         `yaml:"imageRef"`
+	Entrypoint           string         `yaml:"entrypoint"`
+	ParameterSchema      map[string]any `yaml:"parameterSchema"`
+	OutputProtocol       string         `yaml:"outputProtocol"`
+	ResourceRequirements map[string]any `yaml:"resourceRequirements"`
+	Compatibility        map[string]any `yaml:"compatibility"`
+	LicensePolicy        map[string]any `yaml:"licensePolicy"`
+}
+
+func applyAdvancedTemplateYAML(req *trainingTemplateVersionRequest) error {
+	if strings.TrimSpace(req.AdvancedYAML) == "" {
+		return nil
+	}
+	var document trainingTemplateYAML
+	if err := yaml.Unmarshal([]byte(req.AdvancedYAML), &document); err != nil {
+		return fmt.Errorf("高级 YAML 解析失败: %w", err)
+	}
+	req.Trainer, req.ImageRef, req.Entrypoint = document.Trainer, document.ImageRef, document.Entrypoint
+	req.ParameterSchema, req.OutputProtocol = document.ParameterSchema, document.OutputProtocol
+	req.ResourceRequirements, req.Compatibility, req.LicensePolicy = document.ResourceRequirements, document.Compatibility, document.LicensePolicy
+	return nil
 }
 
 type trainingRunRequest struct {
@@ -137,7 +163,15 @@ func (h *Handler) TrainingTemplateVersionCreate(c *gin.Context) {
 		return
 	}
 	var req trainingTemplateVersionRequest
-	if c.ShouldBindJSON(&req) != nil || strings.TrimSpace(req.Trainer) == "" || !strings.HasPrefix(strings.TrimSpace(req.ImageRef), "sha256:") {
+	if c.ShouldBindJSON(&req) != nil {
+		httpx.Fail(c, 400, 400, "模板版本请求格式无效")
+		return
+	}
+	if err := applyAdvancedTemplateYAML(&req); err != nil {
+		httpx.Fail(c, 400, 400, err.Error())
+		return
+	}
+	if strings.TrimSpace(req.Trainer) == "" || !strings.HasPrefix(strings.TrimSpace(req.ImageRef), "sha256:") {
 		httpx.Fail(c, 400, 400, "Trainer 必填，镜像必须使用不可变 sha256 引用")
 		return
 	}
@@ -146,6 +180,10 @@ func (h *Handler) TrainingTemplateVersionCreate(c *gin.Context) {
 	}
 	if req.OutputProtocol != "visionai.result-manifest.v1" {
 		httpx.Fail(c, 400, 400, "不支持的输出协议")
+		return
+	}
+	if err := validateTemplateDefinition(req); err != nil {
+		httpx.Fail(c, 400, 400, err.Error())
 		return
 	}
 	var row TrainingTemplateVersion
@@ -160,6 +198,7 @@ func (h *Handler) TrainingTemplateVersionCreate(c *gin.Context) {
 			ParameterSchema: jsonValue(req.ParameterSchema), OutputProtocol: req.OutputProtocol,
 			ResourceRequirements: jsonValue(req.ResourceRequirements), Compatibility: jsonValue(req.Compatibility),
 			LicensePolicy: jsonValue(req.LicensePolicy), SmokeStatus: "PENDING", SmokeReport: "{}",
+			SourceYAML: req.AdvancedYAML, SourceYAMLSHA256: digestBytes([]byte(req.AdvancedYAML)),
 			CreatedBy: c.GetUint64("user_id"),
 		}
 		return tx.Create(&row).Error
@@ -169,6 +208,165 @@ func (h *Handler) TrainingTemplateVersionCreate(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, row)
+}
+
+func validateTemplateDefinition(req trainingTemplateVersionRequest) error {
+	if req.ParameterSchema == nil || strings.ToLower(fmt.Sprint(req.ParameterSchema["type"])) != "object" {
+		return errors.New("ParameterSchema 必须是 object JSON Schema")
+	}
+	requiredCompatibility := []string{"datasetTypes", "modelTypes", "providers", "cudaRange", "driverRange", "providerVersions"}
+	for _, key := range requiredCompatibility {
+		if value, exists := req.Compatibility[key]; !exists || value == nil || strings.TrimSpace(fmt.Sprint(value)) == "" {
+			return fmt.Errorf("兼容矩阵缺少 %s", key)
+		}
+	}
+	gpuMin := numberFromAny(req.ResourceRequirements["gpuMin"])
+	gpuMax := numberFromAny(req.ResourceRequirements["gpuMax"])
+	if gpuMin < 0 || gpuMax < gpuMin {
+		return errors.New("资源要求中的 gpuMin/gpuMax 无效")
+	}
+	return nil
+}
+
+func numberFromAny(value any) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case json.Number:
+		result, _ := typed.Float64()
+		return result
+	default:
+		result, _ := strconv.ParseFloat(strings.TrimSpace(fmt.Sprint(value)), 64)
+		return result
+	}
+}
+
+func sameJSONValue(left, right any) bool {
+	leftJSON, _ := json.Marshal(left)
+	rightJSON, _ := json.Marshal(right)
+	return string(leftJSON) == string(rightJSON)
+}
+
+func normalizeTrainingParameters(schemaJSON string, parameters map[string]any) (map[string]any, error) {
+	var schema map[string]any
+	if json.Unmarshal([]byte(schemaJSON), &schema) != nil || strings.ToLower(fmt.Sprint(schema["type"])) != "object" {
+		return nil, errors.New("训练模板参数 Schema 无法解析")
+	}
+	if parameters == nil {
+		parameters = map[string]any{}
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	required := map[string]struct{}{}
+	if values, ok := schema["required"].([]any); ok {
+		for _, value := range values {
+			required[fmt.Sprint(value)] = struct{}{}
+		}
+	}
+	for name, rawDefinition := range properties {
+		definition, _ := rawDefinition.(map[string]any)
+		value, exists := parameters[name]
+		if !exists {
+			if defaultValue, hasDefault := definition["default"]; hasDefault {
+				parameters[name] = defaultValue
+				value, exists = defaultValue, true
+			}
+		}
+		if !exists {
+			if _, mandatory := required[name]; mandatory {
+				return nil, fmt.Errorf("训练参数 %s 必填", name)
+			}
+			continue
+		}
+		parameterType := strings.ToLower(strings.TrimSpace(fmt.Sprint(definition["type"])))
+		validType := true
+		numberValue := 0.0
+		switch parameterType {
+		case "integer":
+			numberValue = numberFromAny(value)
+			_, numeric := value.(float64)
+			if !numeric {
+				_, numeric = value.(int)
+			}
+			validType = numeric && math.Trunc(numberValue) == numberValue
+		case "number":
+			numberValue = numberFromAny(value)
+			switch value.(type) {
+			case float64, float32, int, int32, int64, uint, uint32, uint64:
+			default:
+				validType = false
+			}
+		case "boolean":
+			_, validType = value.(bool)
+		case "string":
+			_, validType = value.(string)
+		case "array":
+			_, validType = value.([]any)
+		case "object":
+			_, validType = value.(map[string]any)
+		}
+		if !validType {
+			return nil, fmt.Errorf("训练参数 %s 类型必须是 %s", name, parameterType)
+		}
+		if parameterType == "integer" || parameterType == "number" {
+			if minimum, exists := definition["minimum"]; exists && numberValue < numberFromAny(minimum) {
+				return nil, fmt.Errorf("训练参数 %s 小于最小值 %v", name, minimum)
+			}
+			if maximum, exists := definition["maximum"]; exists && numberValue > numberFromAny(maximum) {
+				return nil, fmt.Errorf("训练参数 %s 大于最大值 %v", name, maximum)
+			}
+			if minimum, exists := definition["exclusiveMinimum"]; exists && numberValue <= numberFromAny(minimum) {
+				return nil, fmt.Errorf("训练参数 %s 必须大于 %v", name, minimum)
+			}
+			if maximum, exists := definition["exclusiveMaximum"]; exists && numberValue >= numberFromAny(maximum) {
+				return nil, fmt.Errorf("训练参数 %s 必须小于 %v", name, maximum)
+			}
+		}
+		if allowed, ok := definition["enum"].([]any); ok && len(allowed) > 0 {
+			matched := false
+			for _, candidate := range allowed {
+				if sameJSONValue(value, candidate) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return nil, fmt.Errorf("训练参数 %s 不在允许的枚举值中", name)
+			}
+		}
+	}
+	if allowed, exists := schema["additionalProperties"]; exists && allowed == false {
+		for name := range parameters {
+			if _, defined := properties[name]; !defined {
+				return nil, fmt.Errorf("训练参数 %s 未在模板 Schema 中定义", name)
+			}
+		}
+	}
+	return parameters, nil
+}
+
+func stringListContains(value any, expected string) bool {
+	expected = strings.ToUpper(strings.TrimSpace(expected))
+	switch rows := value.(type) {
+	case []any:
+		for _, row := range rows {
+			if strings.ToUpper(strings.TrimSpace(fmt.Sprint(row))) == expected {
+				return true
+			}
+		}
+	case []string:
+		for _, row := range rows {
+			if strings.ToUpper(strings.TrimSpace(row)) == expected {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // TrainingTemplateSmoke godoc
@@ -187,28 +385,73 @@ func (h *Handler) TrainingTemplateSmoke(c *gin.Context) {
 		httpx.Fail(c, 409, 409, "模板版本不存在或已发布")
 		return
 	}
-	cfg := config.Load()
-	runID := uint64(time.Now().UnixNano())
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Minute)
-	defer cancel()
-	manifest, log, err := (platformtraining.LocalDocker{
-		Binary:      cfg.DockerBinary,
-		VolumesFrom: cfg.DockerVolumesFrom,
-	}).Run(ctx, platformtraining.LocalDockerSpec{
-		RunID: runID, ImageRef: version.ImageRef, Entrypoint: version.Entrypoint,
-		OutputDir:          filepath.Join(cfg.TrainingWorkRoot, "template-smoke", strconv.FormatUint(version.ID, 10)),
-		DatasetManifestURI: "s3://visionai-assets/smoke/dataset-manifest.json", ParametersJSON: "{}",
-		MemoryBytes: 512 << 20, CPUs: 1,
-	})
-	if err != nil {
-		version.SmokeStatus, version.SmokeReport = "FAILED", jsonValue(gin.H{"error": err.Error(), "log": string(log)})
-		h.db.Save(&version)
-		httpx.Fail(c, 422, 422, "模板冒烟测试失败")
-		return
+	if version.SmokeStatus != "RUNNING" {
+		job := PlatformJob{
+			TenantID: project.TenantID, ProjectID: project.ID, JobType: "TRAINING_TEMPLATE_SMOKE",
+			ResourceType: "TRAINING_TEMPLATE_VERSION", ResourceID: version.ID,
+			Status: JobQueued, Stage: "QUEUED", TraceID: uuid.NewString(),
+			Idempotency: fmt.Sprintf("training-template-smoke:%d:%s", version.ID, uuid.NewString()),
+			MaxRetries:  1, CreatedBy: c.GetUint64("user_id"),
+		}
+		err := h.db.Transaction(func(tx *gorm.DB) error {
+			var locked TrainingTemplateVersion
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("tenant_id = ? AND project_id = ? AND id = ? AND published = ?", project.TenantID, project.ID, version.ID, false).
+				First(&locked).Error; err != nil {
+				return err
+			}
+			if locked.SmokeStatus == "RUNNING" {
+				return nil
+			}
+			if err := tx.Create(&job).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&locked).Updates(map[string]any{
+				"smoke_status": "RUNNING",
+				"smoke_report": jsonValue(gin.H{"jobId": job.ID, "stage": "QUEUED"}),
+			}).Error; err != nil {
+				return err
+			}
+			return tx.Create(&OutboxEvent{
+				TenantID: project.TenantID, EventID: uuid.NewString(),
+				EventType:     "training.template.smoke.requested.v1",
+				AggregateType: "TRAINING_TEMPLATE_VERSION", AggregateID: version.ID,
+				Payload: jsonValue(gin.H{"templateVersionId": version.ID, "jobId": job.ID}),
+				Status:  outboxNew,
+			}).Error
+		})
+		if err != nil {
+			httpx.Fail(c, 409, 409, "模板冒烟任务创建失败")
+			return
+		}
 	}
-	version.SmokeStatus, version.SmokeReport = "PASSED", jsonValue(gin.H{"summary": manifest.Summary, "log": string(log)})
-	h.db.Save(&version)
-	httpx.OK(c, version)
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(10 * time.Minute)
+	defer timeout.Stop()
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case <-timeout.C:
+			httpx.Fail(c, http.StatusGatewayTimeout, http.StatusGatewayTimeout, "模板冒烟仍在 Runner 执行，请稍后刷新")
+			return
+		case <-ticker.C:
+			if err := h.db.Where("tenant_id = ? AND project_id = ? AND id = ?", project.TenantID, project.ID, version.ID).First(&version).Error; err != nil {
+				httpx.Fail(c, 404, 404, "模板版本不存在")
+				return
+			}
+			switch version.SmokeStatus {
+			case "PASSED":
+				httpx.OK(c, version)
+				return
+			case "FAILED":
+				httpx.Fail(c, 422, 422, "模板冒烟测试失败")
+				return
+			}
+		}
+	}
 }
 
 // TrainingTemplatePublish godoc
@@ -257,6 +500,23 @@ func (h *Handler) validateTrainingDependencies(project Project, req trainingRunR
 	if datasetRoot.TaskType != templateRoot.AIType {
 		return dataset, templateVersion, "模板与数据集任务类型不兼容"
 	}
+	var compatibility map[string]any
+	if json.Unmarshal([]byte(templateVersion.Compatibility), &compatibility) != nil {
+		return dataset, templateVersion, "模板兼容矩阵不可解析"
+	}
+	if templateVersion.SourceYAML != "" {
+		if !stringListContains(compatibility["datasetTypes"], datasetRoot.TaskType) ||
+			!stringListContains(compatibility["modelTypes"], templateRoot.AIType) {
+			return dataset, templateVersion, "数据集或模型类型不在模板兼容矩阵内"
+		}
+		if !stringListContains(compatibility["providers"], req.Provider) {
+			return dataset, templateVersion, "执行 Provider 不在模板兼容矩阵内"
+		}
+		providerVersions, providerOK := compatibility["providerVersions"].(map[string]any)
+		if !providerOK || strings.TrimSpace(fmt.Sprint(providerVersions[req.Provider])) == "" {
+			return dataset, templateVersion, "模板未声明当前 Provider 的兼容版本"
+		}
+	}
 	var license map[string]any
 	_ = json.Unmarshal([]byte(templateVersion.LicensePolicy), &license)
 	if allowed, exists := license["allowed"]; exists && allowed == false {
@@ -265,7 +525,62 @@ func (h *Handler) validateTrainingDependencies(project Project, req trainingRunR
 	if req.GPUCount < 0 || req.GPUCount > 8 {
 		return dataset, templateVersion, "GPU 数量超出模板执行范围"
 	}
+	var requirements struct {
+		GPUMin int `json:"gpuMin"`
+		GPUMax int `json:"gpuMax"`
+	}
+	_ = json.Unmarshal([]byte(templateVersion.ResourceRequirements), &requirements)
+	if req.GPUCount < requirements.GPUMin || (requirements.GPUMax > 0 && req.GPUCount > requirements.GPUMax) {
+		return dataset, templateVersion, "GPU 数量不满足模板资源约束"
+	}
+	if req.GPUCount > 0 && req.Provider == "LOCAL_DOCKER" {
+		var node ComputeNode
+		if h.db.Where(
+			"tenant_id = ? AND node_key = ? AND status = ? AND last_heartbeat_at > ?",
+			project.TenantID, "local-docker-gpu-0", "ONLINE", time.Now().Add(-2*time.Minute),
+		).First(&node).Error != nil {
+			return dataset, templateVersion, "兼容矩阵校验需要在线本机 GPU 节点"
+		}
+		if minimum := strings.TrimSpace(fmt.Sprint(compatibility["minCUDA"])); minimum != "" &&
+			compareNumericVersions(node.CUDAVersion, minimum) < 0 {
+			return dataset, templateVersion, "本机 CUDA 版本低于模板兼容下限"
+		}
+		if minimum := strings.TrimSpace(fmt.Sprint(compatibility["minDriver"])); minimum != "" &&
+			compareNumericVersions(node.DriverVersion, minimum) < 0 {
+			return dataset, templateVersion, "本机 NVIDIA 驱动版本低于模板兼容下限"
+		}
+	}
 	return dataset, templateVersion, ""
+}
+
+func compareNumericVersions(left, right string) int {
+	parse := func(value string) []int {
+		fields := strings.FieldsFunc(value, func(r rune) bool { return r < '0' || r > '9' })
+		result := make([]int, 0, len(fields))
+		for _, field := range fields {
+			number, _ := strconv.Atoi(field)
+			result = append(result, number)
+		}
+		return result
+	}
+	leftParts, rightParts := parse(left), parse(right)
+	length := max(len(leftParts), len(rightParts))
+	for index := 0; index < length; index++ {
+		lvalue, rvalue := 0, 0
+		if index < len(leftParts) {
+			lvalue = leftParts[index]
+		}
+		if index < len(rightParts) {
+			rvalue = rightParts[index]
+		}
+		if lvalue < rvalue {
+			return -1
+		}
+		if lvalue > rvalue {
+			return 1
+		}
+	}
+	return 0
 }
 
 // TrainingRunPage godoc
@@ -278,18 +593,45 @@ func (h *Handler) TrainingRunPage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	query := h.db.Model(&TrainingRun{}).Where("tenant_id = ? AND project_id = ?", project.TenantID, project.ID)
+	query := h.db.Table("ai_training_run AS run").
+		Joins("JOIN ai_training_template_version AS template_version ON template_version.id = run.template_version_id AND template_version.tenant_id = run.tenant_id").
+		Where("run.tenant_id = ? AND run.project_id = ?", project.TenantID, project.ID)
 	if status := strings.TrimSpace(c.Query("status")); status != "" {
-		query = query.Where("status = ?", status)
+		query = query.Where("run.status = ?", status)
 	}
 	if provider := strings.TrimSpace(c.Query("provider")); provider != "" {
-		query = query.Where("provider = ?", provider)
+		query = query.Where("run.provider = ?", provider)
+	}
+	if datasetVersionID, err := strconv.ParseUint(c.Query("datasetVersionId"), 10, 64); err == nil && datasetVersionID > 0 {
+		query = query.Where("run.dataset_version_id = ?", datasetVersionID)
+	}
+	if templateVersionID, err := strconv.ParseUint(c.Query("templateVersionId"), 10, 64); err == nil && templateVersionID > 0 {
+		query = query.Where("run.template_version_id = ?", templateVersionID)
+	}
+	if framework := strings.TrimSpace(c.Query("framework")); framework != "" {
+		query = query.Where("template_version.trainer LIKE ?", "%"+framework+"%")
+	}
+	if createdBy, err := strconv.ParseUint(c.Query("createdBy"), 10, 64); err == nil && createdBy > 0 {
+		query = query.Where("run.created_by = ?", createdBy)
+	}
+	if createdFrom := strings.TrimSpace(c.Query("createdFrom")); createdFrom != "" {
+		query = query.Where("run.created_at >= ?", createdFrom)
+	}
+	if createdTo := strings.TrimSpace(c.Query("createdTo")); createdTo != "" {
+		query = query.Where("run.created_at <= ?", createdTo)
 	}
 	var total int64
-	query.Count(&total)
+	if err := query.Count(&total).Error; err != nil {
+		httpx.Fail(c, 500, 500, "训练任务统计失败")
+		return
+	}
 	pageNo, pageSize := page(c)
-	var rows []TrainingRun
-	query.Order("priority DESC, id DESC").Offset((pageNo - 1) * pageSize).Limit(pageSize).Find(&rows)
+	rows := make([]TrainingRun, 0)
+	if err := query.Select("run.*").Order("run.priority DESC, run.id DESC").
+		Offset((pageNo - 1) * pageSize).Limit(pageSize).Scan(&rows).Error; err != nil {
+		httpx.Fail(c, 500, 500, "训练任务查询失败")
+		return
+	}
 	httpx.OK(c, gin.H{"list": rows, "total": total})
 }
 
@@ -316,13 +658,27 @@ func (h *Handler) TrainingRunCreate(c *gin.Context) {
 		httpx.Fail(c, 400, 400, "Provider 必须是 LOCAL_DOCKER 或 CLEARML")
 		return
 	}
-	dataset, _, reason := h.validateTrainingDependencies(project, req)
+	runtimeConfig := config.Load()
+	if req.Provider == "LOCAL_DOCKER" && !localDockerAllowed(runtimeConfig) {
+		httpx.Fail(c, 409, 409, "生产环境默认禁用单机 LocalDocker；仅可在明确启用 Linux 单机 Provider 后使用")
+		return
+	}
+	dataset, templateVersion, reason := h.validateTrainingDependencies(project, req)
 	if reason != "" {
 		httpx.Fail(c, 409, 409, reason)
 		return
 	}
+	normalizedParameters, parameterErr := normalizeTrainingParameters(templateVersion.ParameterSchema, req.Parameters)
+	if parameterErr != nil {
+		httpx.Fail(c, 400, 400, parameterErr.Error())
+		return
+	}
+	req.Parameters = normalizedParameters
 	if req.Queue == "" {
 		req.Queue = "cpu-local"
+		if req.GPUCount > 0 {
+			req.Queue = "gpu-local"
+		}
 	}
 	run := TrainingRun{
 		TenantID: project.TenantID, ProjectID: project.ID, Name: strings.TrimSpace(req.Name),
@@ -371,6 +727,11 @@ func (h *Handler) TrainingRunCreate(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, gin.H{"run": run, "job": job})
+}
+
+func localDockerAllowed(runtimeConfig config.Config) bool {
+	return !strings.EqualFold(strings.TrimSpace(runtimeConfig.Environment), "PRODUCTION") ||
+		runtimeConfig.EnableProductionLocalDocker
 }
 
 // TrainingRunGet godoc

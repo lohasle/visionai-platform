@@ -6,32 +6,73 @@
         <h1>评估与困难样本</h1>
         <p>从总体指标下钻到 FP/FN、置信度、IoU 与场景切片，并保留可复查的门禁证据。</p>
       </div>
-      <el-button type="primary" :disabled="!projectId" @click="suiteVisible = true">新建评估套件</el-button>
+      <el-button type="primary" :disabled="!projectId" @click="suiteVisible = true"
+        >新建评估套件</el-button
+      >
     </header>
     <section class="toolbar">
       <el-select v-model="projectId" placeholder="选择项目" @change="loadAll">
-        <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
+        <el-option
+          v-for="project in projects"
+          :key="project.id"
+          :label="`${project.name} · ${project.code}`"
+          :value="project.id"
+        />
       </el-select>
       <el-button @click="loadAll">刷新</el-button>
     </section>
     <section class="summary-grid">
-      <article><small>评估运行</small><strong>{{ runs.length }}</strong><span>数据集与训练血缘固定</span></article>
-      <article><small>已通过</small><strong>{{ passedCount }}</strong><span>MUST_PASS 门禁</span></article>
-      <article><small>FP / FN</small><strong>{{ fpCount }} / {{ fnCount }}</strong><span>困难样本可检索</span></article>
-      <article><small>mAP</small><strong>{{ primaryMAP }}</strong><span>Evaluator 版本可追溯</span></article>
+      <article
+        ><small>评估运行</small><strong>{{ runs.length }}</strong
+        ><span>数据集与训练血缘固定</span></article
+      >
+      <article
+        ><small>已通过</small><strong>{{ passedCount }}</strong
+        ><span>MUST_PASS 门禁</span></article
+      >
+      <article
+        ><small>FP / FN</small><strong>{{ fpCount }} / {{ fnCount }}</strong
+        ><span>困难样本可检索</span></article
+      >
+      <article
+        ><small>mAP</small><strong>{{ primaryMAP }}</strong
+        ><span>Evaluator 版本可追溯</span></article
+      >
     </section>
     <section class="content-grid">
       <aside>
         <header><b>Evaluation Suite</b><span>阈值、切片、门禁策略</span></header>
-        <button v-for="suite in suites" :key="suite.id" :class="{ active: selectedSuite?.id === suite.id }" @click="selectedSuite = suite">
-          <span>DatasetVersion #{{ suite.datasetVersionId }}</span><strong>{{ suite.name }}</strong><small>{{ suite.gatePolicy }} · {{ suite.evaluatorVersion }}</small>
+        <button
+          v-for="suite in suites"
+          :key="suite.id"
+          :class="{ active: selectedSuite?.id === suite.id }"
+          @click="selectedSuite = suite"
+        >
+          <span>DatasetVersion #{{ suite.datasetVersionId }}</span
+          ><strong>{{ suite.name }}</strong
+          ><small
+            >{{ suite.gatePolicy }} · {{ suite.evaluatorVersion }} ·
+            {{ suite.autoTrigger ? '训练成功自动评估' : '手动触发' }}</small
+          >
         </button>
         <el-button v-if="selectedSuite" @click="runVisible = true">运行评估</el-button>
       </aside>
       <section class="run-list">
         <article v-for="run in runs" :key="run.id" class="run-card" @click="showRun(run)">
-          <div><b>EvaluationRun #{{ run.id }}</b><span>TrainingRun #{{ run.trainingRunId }}</span></div>
-          <el-tag :type="run.gateDecision === 'PASSED' ? 'success' : run.gateDecision === 'BLOCKED' ? 'danger' : 'warning'">{{ run.gateDecision }}</el-tag>
+          <div
+            ><b>EvaluationRun #{{ run.id }}</b
+            ><span>TrainingRun #{{ run.trainingRunId }}</span></div
+          >
+          <el-tag
+            :type="
+              run.gateDecision === 'PASSED'
+                ? 'success'
+                : run.gateDecision === 'BLOCKED'
+                  ? 'danger'
+                  : 'warning'
+            "
+            >{{ run.gateDecision }}</el-tag
+          >
           <p>{{ run.fiftyOneDataset || run.status }}</p>
         </article>
         <div v-if="!runs.length" class="empty-state">创建 Suite 并选择成功训练运行开始评估。</div>
@@ -41,31 +82,142 @@
     <el-dialog v-model="suiteVisible" title="新建评估套件" width="580">
       <el-form label-position="top">
         <el-form-item label="名称"><el-input v-model="suiteForm.name" /></el-form-item>
-        <el-form-item label="冻结 DatasetVersion ID"><el-input-number v-model="suiteForm.datasetVersionId" :min="1" /></el-form-item>
-        <el-form-item label="门禁策略"><el-select v-model="suiteForm.gatePolicy" class="full"><el-option label="必须通过" value="MUST_PASS" /><el-option label="允许回归" value="ALLOW_REGRESSION" /><el-option label="人工审核" value="MANUAL_REVIEW" /></el-select></el-form-item>
-        <div class="form-grid"><el-form-item label="mAP 下限"><el-input-number v-model="suiteForm.map" :min="0" :max="1" :step="0.05" /></el-form-item><el-form-item label="Recall 下限"><el-input-number v-model="suiteForm.recall" :min="0" :max="1" :step="0.05" /></el-form-item></div>
+        <el-form-item label="冻结数据集版本">
+          <el-select
+            v-model="suiteForm.datasetVersionId"
+            class="full"
+            placeholder="选择当前项目的 FROZEN 版本"
+          >
+            <el-option
+              v-for="version in frozenDatasetVersions"
+              :key="version.id"
+              :label="`${version.datasetName} · ${version.semanticVersion} · ${version.itemCount} 张`"
+              :value="version.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="门禁策略"
+          ><el-select v-model="suiteForm.gatePolicy" class="full"
+            ><el-option label="必须通过" value="MUST_PASS" /><el-option
+              label="允许回归"
+              value="ALLOW_REGRESSION" /><el-option
+              label="人工审核"
+              value="MANUAL_REVIEW" /></el-select
+        ></el-form-item>
+        <el-form-item label="触发方式">
+          <el-switch
+            v-model="suiteForm.autoTrigger"
+            active-text="匹配数据集的训练成功后自动评估"
+            inactive-text="仅手动触发"
+          />
+        </el-form-item>
+        <div class="form-grid"
+          ><el-form-item label="mAP 下限"
+            ><el-input-number
+              v-model="suiteForm.map"
+              :min="0"
+              :max="1"
+              :step="0.05" /></el-form-item
+          ><el-form-item label="Recall 下限"
+            ><el-input-number
+              v-model="suiteForm.recall"
+              :min="0"
+              :max="1"
+              :step="0.05" /></el-form-item
+        ></div>
       </el-form>
-      <template #footer><el-button @click="suiteVisible = false">取消</el-button><el-button type="primary" @click="submitSuite">创建</el-button></template>
+      <template #footer
+        ><el-button @click="suiteVisible = false">取消</el-button
+        ><el-button type="primary" @click="submitSuite">创建</el-button></template
+      >
     </el-dialog>
     <el-dialog v-model="runVisible" title="运行评估" width="500">
-      <el-form label-position="top"><el-form-item label="成功 TrainingRun ID"><el-input-number v-model="runForm.trainingRunId" :min="1" /></el-form-item><el-form-item label="Baseline Run（可选）"><el-input-number v-model="runForm.baselineRunId" :min="0" /></el-form-item></el-form>
-      <template #footer><el-button @click="runVisible = false">取消</el-button><el-button type="primary" @click="submitRun">进入队列</el-button></template>
+      <el-form label-position="top">
+        <el-form-item label="成功训练运行">
+          <el-select v-model="runForm.trainingRunId" class="full" placeholder="选择 SUCCEEDED 训练">
+            <el-option
+              v-for="run in succeededTrainingRuns"
+              :key="run.id"
+              :label="`#${run.id} · ${run.name}`"
+              :value="run.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Baseline Run（可选）"
+          ><el-input-number v-model="runForm.baselineRunId" :min="0"
+        /></el-form-item>
+      </el-form>
+      <template #footer
+        ><el-button @click="runVisible = false">取消</el-button
+        ><el-button type="primary" @click="submitRun">进入队列</el-button></template
+      >
     </el-dialog>
     <el-drawer v-model="detailVisible" title="评估证据与困难样本" size="65%">
       <template v-if="detail">
-        <section class="metric-grid"><article v-for="metric in detail.metrics" :key="metric.id"><small>{{ metric.name }}</small><strong>{{ formatMetric(metric) }}</strong></article></section>
-        <div class="slice-row"><el-button v-for="slice in detail.savedSlices" :key="slice.id" @click="filterSamples(slice.name)">{{ slice.name }} · {{ slice.sampleCount }}</el-button><el-button type="primary" plain @click="workbench">受控工作台</el-button></div>
+        <section class="metric-grid"
+          ><article v-for="metric in detail.metrics" :key="metric.id"
+            ><small>{{ metric.name }}</small
+            ><strong>{{ formatMetric(metric) }}</strong></article
+          ></section
+        >
+        <div class="slice-row"
+          ><el-button
+            v-for="slice in detail.savedSlices"
+            :key="slice.id"
+            @click="filterSamples(slice.id)"
+            >{{ slice.name }} · {{ slice.sampleCount }}</el-button
+          ><el-button type="primary" plain @click="sliceVisible = true">保存切片</el-button
+          ><el-button type="primary" plain @click="workbench">受控工作台</el-button></div
+        >
         <el-table :data="detail.samples">
           <el-table-column prop="assetId" label="Asset" width="90" />
           <el-table-column prop="split" label="Split" width="85" />
           <el-table-column prop="slice" label="切片" />
-          <el-table-column prop="errorType" label="错误" width="90"><template #default="{ row }"><el-tag :type="row.errorType === 'TP' ? 'success' : 'danger'">{{ row.errorType }}</el-tag></template></el-table-column>
+          <el-table-column prop="targetSize" label="目标尺寸" width="100" />
+          <el-table-column prop="scene" label="场景" min-width="120" />
+          <el-table-column prop="device" label="设备" min-width="120" />
+          <el-table-column prop="errorType" label="错误" width="90"
+            ><template #default="{ row }"
+              ><el-tag :type="row.errorType === 'TP' ? 'success' : 'danger'">{{
+                row.errorType
+              }}</el-tag></template
+            ></el-table-column
+          >
           <el-table-column prop="confidence" label="Confidence" />
           <el-table-column prop="iou" label="IoU" />
           <el-table-column prop="latencyMs" label="Latency(ms)" />
         </el-table>
       </template>
     </el-drawer>
+    <el-dialog v-model="sliceVisible" title="保存评估切片" width="640">
+      <el-form label-position="top">
+        <el-form-item label="切片名称" required>
+          <el-input v-model="sliceForm.name" placeholder="例如 夜间 Camera-A 小目标" />
+        </el-form-item>
+        <div class="form-grid">
+          <el-form-item label="类别"><el-input v-model="sliceForm.category" /></el-form-item>
+          <el-form-item label="目标尺寸">
+            <el-select v-model="sliceForm.targetSize" clearable class="full">
+              <el-option label="小目标" value="small" />
+              <el-option label="中目标" value="medium" />
+              <el-option label="大目标" value="large" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="场景"><el-input v-model="sliceForm.scene" /></el-form-item>
+          <el-form-item label="设备"><el-input v-model="sliceForm.device" /></el-form-item>
+          <el-form-item label="最低置信度">
+            <el-input-number v-model="sliceForm.confidenceMin" :min="0" :max="1" :step="0.05" />
+          </el-form-item>
+          <el-form-item label="最高置信度">
+            <el-input-number v-model="sliceForm.confidenceMax" :min="0" :max="1" :step="0.05" />
+          </el-form-item>
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="sliceVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveSlice">保存并统计样本</el-button>
+      </template>
+    </el-dialog>
     <EmbeddedWorkbench
       v-model="workbenchVisible"
       provider="FiftyOne"
@@ -81,9 +233,18 @@
 <script lang="ts" setup>
 import EmbeddedWorkbench from '@/views/ai-platform/components/EmbeddedWorkbench.vue'
 import { getProjectPage, type Project } from '@/api/ai-platform/projects'
+import { getDatasets, getDatasetVersions, type DatasetVersion } from '@/api/ai-platform/datasets'
+import { getTrainingRuns, type TrainingRun } from '@/api/ai-platform/training'
 import {
-  createEvaluationRun, createEvaluationSuite, getEvaluationRun, getEvaluationRuns,
-  getEvaluationSuites, openEvaluationWorkbench, type EvaluationMetric, type EvaluationRun,
+  createEvaluationRun,
+  createEvaluationSavedSlice,
+  createEvaluationSuite,
+  getEvaluationRun,
+  getEvaluationRuns,
+  getEvaluationSuites,
+  openEvaluationWorkbench,
+  type EvaluationMetric,
+  type EvaluationRun,
   type EvaluationSuite
 } from '@/api/ai-platform/evaluation'
 
@@ -94,17 +255,36 @@ const projectId = ref<number>()
 const suites = ref<EvaluationSuite[]>([])
 const selectedSuite = ref<EvaluationSuite>()
 const runs = ref<EvaluationRun[]>([])
+const frozenDatasetVersions = ref<Array<DatasetVersion & { datasetName: string }>>([])
+const succeededTrainingRuns = ref<TrainingRun[]>([])
 const detail = ref<Awaited<ReturnType<typeof getEvaluationRun>>>()
 const suiteVisible = ref(false)
 const runVisible = ref(false)
 const detailVisible = ref(false)
+const sliceVisible = ref(false)
 const workbenchVisible = ref(false)
 const workbenchUrl = ref('')
 const workbenchTitle = ref('FiftyOne 评估工作台')
 const workbenchContext = ref('')
 const activeWorkbenchRunId = ref<number>()
-const suiteForm = reactive({ name: '', datasetVersionId: 3, gatePolicy: 'MUST_PASS', map: 0.5, recall: 0.5 })
-const runForm = reactive({ trainingRunId: 1, baselineRunId: 0 })
+const suiteForm = reactive({
+  name: '',
+  datasetVersionId: undefined as number | undefined,
+  gatePolicy: 'MUST_PASS',
+  autoTrigger: true,
+  map: 0.5,
+  recall: 0.5
+})
+const runForm = reactive({ trainingRunId: undefined as number | undefined, baselineRunId: 0 })
+const sliceForm = reactive({
+  name: '',
+  category: '',
+  targetSize: '',
+  scene: '',
+  device: '',
+  confidenceMin: undefined as number | undefined,
+  confidenceMax: undefined as number | undefined
+})
 const passedCount = computed(() => runs.value.filter((run) => run.gateDecision === 'PASSED').length)
 const metricValue = (name: string) => detail.value?.metrics.find((m) => m.name === name)?.value || 0
 const fpCount = computed(() => metricValue('FP'))
@@ -112,22 +292,52 @@ const fnCount = computed(() => metricValue('FN'))
 const primaryMAP = computed(() => metricValue('mAP').toFixed(3))
 const loadAll = async () => {
   if (!projectId.value) return
-  ;[suites.value, runs.value] = await Promise.all([getEvaluationSuites(projectId.value), getEvaluationRuns(projectId.value)])
+  const [suiteRows, evaluationRows, datasetRows, trainingRows] = await Promise.all([
+    getEvaluationSuites(projectId.value),
+    getEvaluationRuns(projectId.value),
+    getDatasets(projectId.value),
+    getTrainingRuns(projectId.value)
+  ])
+  suites.value = suiteRows
+  runs.value = evaluationRows
+  const versionGroups = await Promise.all(
+    datasetRows.map(async (dataset) =>
+      (await getDatasetVersions(projectId.value!, dataset.id))
+        .filter((version) => version.status === 'FROZEN')
+        .map((version) => ({ ...version, datasetName: dataset.name }))
+    )
+  )
+  frozenDatasetVersions.value = versionGroups.flat()
+  succeededTrainingRuns.value = trainingRows.list.filter((run) => run.status === 'SUCCEEDED')
+  if (!frozenDatasetVersions.value.some((version) => version.id === suiteForm.datasetVersionId))
+    suiteForm.datasetVersionId = frozenDatasetVersions.value[0]?.id
+  if (!succeededTrainingRuns.value.some((run) => run.id === runForm.trainingRunId))
+    runForm.trainingRunId = succeededTrainingRuns.value[0]?.id
   selectedSuite.value = suites.value[0]
-  if (runs.value[0]?.status === 'SUCCEEDED') detail.value = await getEvaluationRun(projectId.value, runs.value[0].id)
+  if (runs.value[0]?.status === 'SUCCEEDED')
+    detail.value = await getEvaluationRun(projectId.value, runs.value[0].id)
 }
 const submitSuite = async () => {
-  if (!projectId.value || !suiteForm.name.trim()) return
+  if (!projectId.value || !suiteForm.name.trim() || !suiteForm.datasetVersionId) {
+    message.warning('请填写名称并选择冻结数据集版本')
+    return
+  }
   selectedSuite.value = await createEvaluationSuite(projectId.value, {
-    name: suiteForm.name, datasetVersionId: suiteForm.datasetVersionId, gatePolicy: suiteForm.gatePolicy,
-    slices: ['all', 'small-object', 'occluded', 'dense', 'night', 'low-confidence'],
+    name: suiteForm.name,
+    datasetVersionId: suiteForm.datasetVersionId,
+    gatePolicy: suiteForm.gatePolicy,
+    autoTrigger: suiteForm.autoTrigger,
+    slices: ['all', 'category', 'target-size', 'scene', 'device', 'time', 'confidence'],
     thresholds: { mAP: suiteForm.map, precision: 0.5, recall: suiteForm.recall }
   })
   suiteVisible.value = false
   await loadAll()
 }
 const submitRun = async () => {
-  if (!projectId.value || !selectedSuite.value) return
+  if (!projectId.value || !selectedSuite.value || !runForm.trainingRunId) {
+    message.warning('请选择成功训练运行')
+    return
+  }
   await createEvaluationRun(projectId.value, selectedSuite.value.id, runForm)
   runVisible.value = false
   message.success('评估已进入统一任务队列')
@@ -137,10 +347,19 @@ const showRun = async (run: EvaluationRun) => {
   detail.value = await getEvaluationRun(projectId.value!, run.id)
   detailVisible.value = true
 }
-const filterSamples = async (name: string) => {
+const filterSamples = async (savedSliceId: number) => {
   if (!detail.value) return
-  const type = name.includes('Positive') ? 'FP' : name.includes('Negative') ? 'FN' : undefined
-  detail.value = await getEvaluationRun(projectId.value!, detail.value.run.id, type)
+  detail.value = await getEvaluationRun(projectId.value!, detail.value.run.id, { savedSliceId })
+}
+const saveSlice = async () => {
+  if (!projectId.value || !detail.value || !sliceForm.name.trim())
+    return message.warning('请填写切片名称')
+  const row = await createEvaluationSavedSlice(projectId.value, detail.value.run.id, {
+    ...sliceForm
+  })
+  sliceVisible.value = false
+  message.success(`切片已保存，命中 ${row.sampleCount} 个样本`)
+  detail.value = await getEvaluationRun(projectId.value, detail.value.run.id)
 }
 const workbench = async () => {
   if (!detail.value) return
@@ -169,7 +388,8 @@ const openWorkbenchExternal = async () => {
     throw error
   }
 }
-const formatMetric = (metric: EvaluationMetric) => ['FP', 'FN'].includes(metric.name) ? metric.value : metric.value.toFixed(3)
+const formatMetric = (metric: EvaluationMetric) =>
+  ['FP', 'FN'].includes(metric.name) ? metric.value : metric.value.toFixed(3)
 onMounted(async () => {
   const data = await getProjectPage({ pageNo: 1, pageSize: 100 })
   projects.value = data.list

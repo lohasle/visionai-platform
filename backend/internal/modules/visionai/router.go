@@ -1,8 +1,12 @@
 package visionai
 
 import (
+	"encoding/json"
+
 	"github.com/gin-gonic/gin"
+	"github.com/lohasle/nimbus-framework-go/internal/modules/system"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func Migrate(db *gorm.DB) error {
@@ -12,6 +16,7 @@ func Migrate(db *gorm.DB) error {
 		&Asset{}, &UploadSession{}, &UploadChunk{}, &AssetReference{},
 		&AssetImportRun{},
 		&AssetCollection{}, &AssetCollectionItem{}, &AssetTag{},
+		&AssetTagDefinition{}, &Ontology{}, &OntologyVersion{}, &OntologyLabel{}, &OntologyAttribute{},
 		&AnnotationTask{}, &AnnotationRevision{}, &ExternalResourceBinding{},
 		&CVATUserMapping{}, &WorkbenchTicket{}, &PreannotationRun{},
 		&Dataset{}, &DatasetVersion{}, &DatasetVersionItem{},
@@ -19,17 +24,122 @@ func Migrate(db *gorm.DB) error {
 		&TrainingTemplate{}, &TrainingTemplateVersion{}, &TrainingRun{},
 		&TrainingArtifact{}, &TrainingMetric{},
 		&EvaluationSuite{}, &EvaluationRun{}, &EvaluationMetric{}, &EvaluationSample{}, &EvaluationSavedSlice{},
-		&Model{}, &ModelVersion{}, &ModelArtifact{}, &ApprovalRequest{}, &ApprovalDecision{},
-		&Deployment{}, &DeploymentRevision{}, &InferenceTrace{}, &AlertRule{}, &AlertEvent{},
-		&FeedbackPolicy{}, &FeedbackSample{}, &FeedbackBatch{},
-		&ComputeNode{}, &ComputeQueue{}, &ProjectQuota{}, &IntegrationInstance{}, &CompatibilityRule{}, &SyncIncident{},
+		&Model{}, &ModelVersion{}, &ModelArtifact{}, &ModelLicenseDeclaration{},
+		&ApprovalTemplate{}, &ApprovalRequest{}, &ApprovalDecision{}, &ApprovalStepDecision{},
+		&Deployment{}, &DeploymentRevision{}, &InferenceTrace{}, &AlertRule{}, &AlertEvent{}, &DriftBaseline{},
+		&FeedbackPolicy{}, &FeedbackSample{}, &FeedbackBatch{}, &FeedbackBenefitEvaluation{},
+		&ComputeNode{}, &ResourceMetricSample{}, &ComputeQueue{}, &ProjectQuota{}, &IntegrationInstance{}, &CompatibilityRule{},
+		&IntegrationConfigRevision{}, &SyncIncident{},
 	); err != nil {
+		return err
+	}
+	if err := system.EnsureVisionAIRoles(db); err != nil {
+		return err
+	}
+	if err := migrateLegacyOntologies(db); err != nil {
+		return err
+	}
+	if err := migrateLegacyAssetTags(db); err != nil {
+		return err
+	}
+	if err := migrateAssetQualityStatus(db); err != nil {
+		return err
+	}
+	if err := migrateDatasetUsageLineage(db); err != nil {
+		return err
+	}
+	if err := migrateLegacyProjectRoles(db); err != nil {
 		return err
 	}
 	if db.Migrator().HasIndex(&ModelArtifact{}, "uk_model_artifact") {
 		return db.Migrator().DropIndex(&ModelArtifact{}, "uk_model_artifact")
 	}
 	return nil
+}
+
+func migrateDatasetUsageLineage(db *gorm.DB) error {
+	var versions []ModelVersion
+	if err := db.Where("dataset_version_id > 0").Find(&versions).Error; err != nil {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, version := range versions {
+			modelUsage := DatasetUsage{
+				TenantID: version.TenantID, ProjectID: version.ProjectID, DatasetVersionID: version.DatasetVersionID,
+				ResourceType: "MODEL_VERSION", ResourceID: version.ID,
+			}
+			if err := tx.Where(
+				"dataset_version_id = ? AND resource_type = ? AND resource_id = ?",
+				modelUsage.DatasetVersionID, modelUsage.ResourceType, modelUsage.ResourceID,
+			).FirstOrCreate(&modelUsage).Error; err != nil {
+				return err
+			}
+			var revisions []DeploymentRevision
+			if err := tx.Where(
+				"tenant_id = ? AND project_id = ? AND model_version_id = ?",
+				version.TenantID, version.ProjectID, version.ID,
+			).Find(&revisions).Error; err != nil {
+				return err
+			}
+			for _, revision := range revisions {
+				deploymentUsage := DatasetUsage{
+					TenantID: version.TenantID, ProjectID: version.ProjectID, DatasetVersionID: version.DatasetVersionID,
+					ResourceType: "DEPLOYMENT", ResourceID: revision.DeploymentID,
+				}
+				if err := tx.Where(
+					"dataset_version_id = ? AND resource_type = ? AND resource_id = ?",
+					deploymentUsage.DatasetVersionID, deploymentUsage.ResourceType, deploymentUsage.ResourceID,
+				).FirstOrCreate(&deploymentUsage).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
+
+func migrateAssetQualityStatus(db *gorm.DB) error {
+	if err := db.Model(&Asset{}).
+		Where("status = ? AND error_code <> ''", AssetReady).
+		Update("status", AssetInvalid).Error; err != nil {
+		return err
+	}
+	return db.Model(&Asset{}).
+		Where("language = ? OR source_device = ? OR business_scene = ?", "<nil>", "<nil>", "<nil>").
+		Updates(map[string]any{
+			"language":       gorm.Expr("IF(language = '<nil>', '', language)"),
+			"source_device":  gorm.Expr("IF(source_device = '<nil>', '', source_device)"),
+			"business_scene": gorm.Expr("IF(business_scene = '<nil>', '', business_scene)"),
+		}).Error
+}
+
+func migrateLegacyProjectRoles(db *gorm.DB) error {
+	var members []ProjectMember
+	if err := db.Where("roles IS NOT NULL AND JSON_LENGTH(roles) > 0").Find(&members).Error; err != nil {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, member := range members {
+			var codes []string
+			if json.Unmarshal([]byte(member.LegacyRoles), &codes) != nil {
+				continue
+			}
+			for _, code := range codes {
+				var role system.Role
+				if err := tx.Where("tenant_id = ? AND code = ?", member.TenantID, code).First(&role).Error; err != nil {
+					continue
+				}
+				assignment := system.UserRole{UserID: member.UserID, RoleID: role.ID}
+				if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&assignment).Error; err != nil {
+					return err
+				}
+			}
+			if err := tx.Model(&member).Update("roles", "[]").Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func Register(group *gin.RouterGroup, db *gorm.DB, auth gin.HandlerFunc) {
@@ -48,10 +158,20 @@ func Register(group *gin.RouterGroup, db *gorm.DB, auth gin.HandlerFunc) {
 	api.GET("/projects", h.ProjectPage)
 	api.POST("/projects", h.ProjectCreate)
 	api.GET("/projects/:id", h.ProjectGet)
+	api.GET("/projects/:id/overview", h.ProjectOverview)
 	api.PUT("/projects/:id", h.ProjectUpdate)
 	api.PUT("/projects/:id/status", h.ProjectStatusUpdate)
 	api.POST("/projects/:id/archive", h.ProjectArchive)
 	api.POST("/projects/:id/clone", h.ProjectClone)
+	api.GET("/projects/:id/ontologies", h.OntologyPage)
+	api.POST("/projects/:id/ontologies", h.OntologyCreate)
+	api.GET("/projects/:id/ontologies/:ontologyId", h.OntologyGet)
+	api.POST("/projects/:id/ontologies/:ontologyId/versions", h.OntologyVersionCreate)
+	api.GET("/projects/:id/ontology-versions", h.OntologyVersionPage)
+	api.GET("/projects/:id/ontology-versions/:versionId", h.OntologyVersionGet)
+	api.PUT("/projects/:id/ontology-versions/:versionId/labels", h.OntologyLabelsReplace)
+	api.POST("/projects/:id/ontology-versions/:versionId/publish", h.OntologyVersionPublish)
+	api.POST("/projects/:id/ontology-versions/:versionId/deprecate", h.OntologyVersionDeprecate)
 	api.GET("/projects/:id/members", h.ProjectMemberList)
 	api.PUT("/projects/:id/members", h.ProjectMemberUpsert)
 	api.DELETE("/projects/:id/members/:userId", h.ProjectMemberDelete)
@@ -62,7 +182,9 @@ func Register(group *gin.RouterGroup, db *gorm.DB, auth gin.HandlerFunc) {
 	api.PUT("/projects/:id/uploads/:sessionId/chunks/:part", h.UploadChunkPut)
 	api.POST("/projects/:id/uploads/:sessionId/complete", h.UploadComplete)
 	api.GET("/projects/:id/assets", h.AssetPage)
+	api.PUT("/projects/:id/assets/tags", h.AssetTagsBatchUpdate)
 	api.GET("/projects/:id/assets/quality", h.AssetQuality)
+	api.POST("/projects/:id/assets/similarity", h.AssetSimilarityAnalyze)
 	api.GET("/projects/:id/assets/:assetId", h.AssetGet)
 	api.DELETE("/projects/:id/assets/:assetId", h.AssetDelete)
 	api.POST("/projects/:id/assets/:assetId/restore", h.AssetRestore)
@@ -72,9 +194,13 @@ func Register(group *gin.RouterGroup, db *gorm.DB, auth gin.HandlerFunc) {
 	api.GET("/projects/:id/asset-imports/:importId", h.AssetImportGet)
 	api.GET("/projects/:id/collections", h.CollectionPage)
 	api.POST("/projects/:id/collections", h.CollectionCreate)
+	api.GET("/projects/:id/collections/:collectionId/assets", h.CollectionAssetsPage)
 	api.PUT("/projects/:id/collections/:collectionId/assets", h.CollectionAddAssets)
 	api.POST("/projects/:id/collections/:collectionId/freeze", h.CollectionFreeze)
 	api.PUT("/projects/:id/assets/:assetId/tags", h.AssetTagsUpdate)
+	api.GET("/projects/:id/tag-definitions", h.AssetTagDefinitionPage)
+	api.POST("/projects/:id/tag-definitions", h.AssetTagDefinitionCreate)
+	api.PUT("/projects/:id/tag-definitions/:definitionId", h.AssetTagDefinitionUpdate)
 	api.GET("/cvat-user-mappings", h.CVATUserMappingList)
 	api.PUT("/cvat-user-mappings", h.CVATUserMappingUpsert)
 	api.GET("/projects/:id/annotation-tasks", h.AnnotationTaskPage)
@@ -88,6 +214,7 @@ func Register(group *gin.RouterGroup, db *gorm.DB, auth gin.HandlerFunc) {
 	api.POST("/projects/:id/annotation-tasks/:taskId/workbench", h.AnnotationWorkbench)
 	api.POST("/projects/:id/annotation-tasks/:taskId/preannotations", h.PreannotationCreate)
 	api.PUT("/projects/:id/annotation-tasks/:taskId/preannotations/:runId/metrics", h.PreannotationMetricsUpdate)
+	api.GET("/projects/:id/preannotations/compare", h.PreannotationCompare)
 	api.GET("/projects/:id/datasets", h.DatasetPage)
 	api.POST("/projects/:id/datasets", h.DatasetCreate)
 	api.GET("/projects/:id/datasets/:datasetId/versions", h.DatasetVersions)
@@ -116,6 +243,7 @@ func Register(group *gin.RouterGroup, db *gorm.DB, auth gin.HandlerFunc) {
 	api.GET("/projects/:id/evaluation-runs", h.EvaluationRunPage)
 	api.POST("/projects/:id/evaluation-suites/:suiteId/runs", h.EvaluationRunCreate)
 	api.GET("/projects/:id/evaluation-runs/:runId", h.EvaluationRunGet)
+	api.POST("/projects/:id/evaluation-runs/:runId/slices", h.EvaluationSavedSliceCreate)
 	api.POST("/projects/:id/evaluation-runs/:runId/workbench", h.EvaluationWorkbench)
 	api.GET("/projects/:id/models", h.ModelPage)
 	api.POST("/projects/:id/models/register", h.ModelRegister)
@@ -123,10 +251,15 @@ func Register(group *gin.RouterGroup, db *gorm.DB, auth gin.HandlerFunc) {
 	api.GET("/projects/:id/model-versions/compare", h.ModelVersionCompare)
 	api.GET("/projects/:id/model-versions/:versionId", h.ModelVersionGet)
 	api.GET("/projects/:id/model-versions/:versionId/export-manifest", h.ModelExportManifest)
+	api.POST("/projects/:id/model-versions/:versionId/export", h.ModelExport)
+	api.PUT("/projects/:id/model-versions/:versionId/licenses", h.ModelLicensesReplace)
 	api.POST("/projects/:id/model-versions/:versionId/retire", h.ModelVersionRetire)
 	api.POST("/projects/:id/model-versions/:versionId/approvals", h.ApprovalSubmit)
+	api.GET("/approval-templates", h.ApprovalTemplatePage)
+	api.POST("/approval-templates", h.ApprovalTemplateCreate)
 	api.GET("/projects/:id/approvals", h.ApprovalPage)
 	api.POST("/projects/:id/approvals/:approvalId/decision", h.ApprovalDecide)
+	api.POST("/projects/:id/approvals/:approvalId/cancel", h.ApprovalCancel)
 	api.GET("/projects/:id/deployments", h.DeploymentPage)
 	api.POST("/projects/:id/deployments", h.DeploymentCreate)
 	api.GET("/projects/:id/deployments/:deploymentId", h.DeploymentGet)
@@ -138,24 +271,34 @@ func Register(group *gin.RouterGroup, db *gorm.DB, auth gin.HandlerFunc) {
 	api.POST("/projects/:id/deployments/:deploymentId/stop", h.DeploymentStop)
 	api.POST("/projects/:id/deployments/:deploymentId/restart", h.DeploymentRestart)
 	api.POST("/projects/:id/deployments/:deploymentId/alert-rules", h.AlertRuleCreate)
+	api.POST("/projects/:id/deployments/:deploymentId/alert-rules/:ruleId/silence", h.AlertRuleSilence)
 	api.POST("/projects/:id/alerts/:alertId/acknowledge", h.AlertAcknowledge)
+	api.POST("/projects/:id/alerts/:alertId/resolve", h.AlertResolve)
+	api.POST("/projects/:id/deployments/:deploymentId/drift-baseline", h.DriftBaselineSave)
 	api.GET("/projects/:id/feedback-policy", h.FeedbackPolicyGet)
 	api.PUT("/projects/:id/feedback-policy", h.FeedbackPolicySave)
 	api.GET("/projects/:id/feedback-samples", h.FeedbackSamplePage)
+	api.POST("/projects/:id/inference-traces/:traceId/feedback", h.FeedbackManualCapture)
 	api.POST("/projects/:id/feedback-batches", h.FeedbackBatchCreate)
 	api.GET("/projects/:id/feedback-batches", h.FeedbackBatchPage)
 	api.GET("/projects/:id/feedback-batches/:batchId", h.FeedbackBatchGet)
 	api.POST("/projects/:id/feedback-batches/:batchId/review", h.FeedbackBatchReview)
 	api.POST("/projects/:id/feedback-cleanup", h.FeedbackCleanup)
+	api.GET("/projects/:id/feedback-benefits", h.FeedbackBenefitPage)
+	api.POST("/projects/:id/feedback-benefits", h.FeedbackBenefitCreate)
 	api.GET("/resources/overview", h.ResourceOverview)
+	api.GET("/resources/history", h.ResourceHistory)
 	api.POST("/resources/nodes/heartbeat", h.ComputeNodeHeartbeat)
 	api.PUT("/resources/queues", h.ComputeQueueSave)
 	api.PUT("/projects/:id/quota", h.ProjectQuotaSave)
 	api.GET("/integrations", h.IntegrationPage)
 	api.POST("/integrations", h.IntegrationCreate)
 	api.POST("/integrations/:instanceId/test", h.IntegrationTest)
+	api.GET("/integrations/:instanceId/revisions", h.IntegrationRevisionPage)
+	api.POST("/integrations/:instanceId/upgrade", h.IntegrationUpgrade)
 	api.POST("/compatibility-rules", h.CompatibilityRuleCreate)
 	api.POST("/sync-incidents/:incidentId/replay", h.SyncIncidentReplay)
+	api.POST("/sync-incidents/:incidentId/action", h.SyncIncidentAction)
 	api.GET("/audit-events", h.AuditPage)
 	api.GET("/audit-events/export", h.AuditExport)
 }

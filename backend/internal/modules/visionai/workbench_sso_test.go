@@ -1,48 +1,63 @@
 package visionai
 
 import (
-	"strings"
+	"net/http/httptest"
+	"net/url"
 	"testing"
-	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
-func TestCVATCredentialEncryption(t *testing.T) {
-	encrypted, err := encryptCVATCredential("unique-personal-secret")
+func workbenchTestContext(host, origin string) *gin.Context {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	request := httptest.NewRequest("POST", "http://"+host+"/admin-api/ai-platform/test", nil)
+	request.Host = host
+	if origin != "" {
+		request.Header.Set("Origin", origin)
+	}
+	ctx.Request = request
+	return ctx
+}
+
+func TestWorkbenchTargetUsesCurrentAccessHostname(t *testing.T) {
+	ctx := workbenchTestContext("192.168.88.20:48080", "http://192.168.88.20:48080")
+	target, err := workbenchTargetForRequest(
+		ctx,
+		"FIFTYONE",
+		configuredWorkbenchBase("FIFTYONE")+"/?dataset=tenant-1-project-2-evaluation-3",
+	)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rewrite workbench target: %v", err)
 	}
-	if encrypted == "unique-personal-secret" || strings.Contains(encrypted, "personal") {
-		t.Fatal("credential was not encrypted")
+	parsed, err := url.Parse(target)
+	if err != nil {
+		t.Fatalf("parse rewritten target: %v", err)
 	}
-	decrypted, err := decryptCVATCredential(encrypted)
-	if err != nil || decrypted != "unique-personal-secret" {
-		t.Fatalf("decrypt = %q, %v", decrypted, err)
+	if parsed.Hostname() != "192.168.88.20" {
+		t.Fatalf("expected request hostname, got %q", parsed.Hostname())
 	}
-	if _, err = decryptCVATCredential(encrypted[:len(encrypted)-2] + "xx"); err == nil {
-		t.Fatal("tampered credential must be rejected")
+	if parsed.Query().Get("dataset") != "tenant-1-project-2-evaluation-3" {
+		t.Fatalf("dataset query was not preserved: %q", parsed.RawQuery)
+	}
+	if !allowedWorkbenchRedirect(ctx, "FIFTYONE", target) {
+		t.Fatal("rewritten same-host target should be trusted")
 	}
 }
 
-func TestWorkbenchSessionSigning(t *testing.T) {
-	claims := workbenchSessionClaims{
-		Provider: "FIFTYONE", TenantID: 1, ProjectID: 12, UserID: 3,
-		ExpiresAt: time.Now().Add(time.Hour).Unix(),
+func TestWorkbenchTargetRejectsOriginHostMismatch(t *testing.T) {
+	ctx := workbenchTestContext("localhost:48080", "http://attacker.example:48080")
+	if _, err := workbenchBaseForRequest(ctx, "CVAT"); err == nil {
+		t.Fatal("expected a mismatched Origin hostname to be rejected")
 	}
-	session, err := signWorkbenchSession(claims)
-	if err != nil {
-		t.Fatal(err)
-	}
-	verified, err := verifyWorkbenchSession(session, "FIFTYONE")
-	if err != nil || verified.UserID != claims.UserID || verified.ProjectID != claims.ProjectID {
-		t.Fatalf("verified = %+v, %v", verified, err)
-	}
-	if _, err = verifyWorkbenchSession(session+"x", "FIFTYONE"); err == nil {
-		t.Fatal("tampered session must be rejected")
-	}
-	expired, _ := signWorkbenchSession(workbenchSessionClaims{
-		Provider: "FIFTYONE", TenantID: 1, UserID: 3, ExpiresAt: time.Now().Add(-time.Second).Unix(),
-	})
-	if _, err = verifyWorkbenchSession(expired, "FIFTYONE"); err == nil {
-		t.Fatal("expired session must be rejected")
+}
+
+func TestWorkbenchRedirectRejectsDifferentAccessHostname(t *testing.T) {
+	ctx := workbenchTestContext("localhost:25151", "")
+	target := configuredWorkbenchBase("FIFTYONE") + "/?dataset=controlled"
+	parsed, _ := url.Parse(target)
+	parsed.Host = "192.168.88.20:" + parsed.Port()
+	if allowedWorkbenchRedirect(ctx, "FIFTYONE", parsed.String()) {
+		t.Fatal("redirect to a different access hostname must be rejected")
 	}
 }

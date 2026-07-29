@@ -18,6 +18,7 @@ type AuditEvent struct {
 	Action       string    `gorm:"size:128;index;not null" json:"action"`
 	ResourceType string    `gorm:"size:64;index;not null" json:"resourceType"`
 	ResourceID   uint64    `gorm:"index;not null;default:0" json:"resourceId"`
+	Result       string    `gorm:"size:24;index;not null;default:SUCCESS" json:"result"`
 	BeforeJSON   string    `gorm:"type:json" json:"before"`
 	AfterJSON    string    `gorm:"type:json" json:"after"`
 	TraceID      string    `gorm:"size:64;index" json:"traceId"`
@@ -36,6 +37,7 @@ func appendAudit(tx *gorm.DB, c *gin.Context, projectID uint64, action, resource
 	return tx.Create(&AuditEvent{
 		TenantID: tenantID(c), ProjectID: projectID, ActorUserID: c.GetUint64("user_id"),
 		Action: action, ResourceType: resourceType, ResourceID: resourceID,
+		Result:     "SUCCESS",
 		BeforeJSON: string(beforeJSON), AfterJSON: string(afterJSON),
 		TraceID: c.GetString("trace_id"), IP: c.ClientIP(),
 	}).Error

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -39,22 +40,75 @@ func ticketHash(token string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func allowedWorkbenchRedirect(provider, target string) bool {
+func configuredWorkbenchBase(provider string) string {
 	cfg := config.Load()
 	base := cfg.FiftyOnePublicURL
 	if provider == "CVAT" {
 		base = cfg.CVATPublicURL
 	}
+	return strings.TrimRight(base, "/")
+}
+
+func requestHostname(c *gin.Context) string {
+	parsed, err := url.Parse("//" + c.Request.Host)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(parsed.Hostname())
+}
+
+func workbenchBaseForRequest(c *gin.Context, provider string) (string, error) {
+	baseURL, err := url.Parse(configuredWorkbenchBase(provider))
+	if err != nil || baseURL.Hostname() == "" {
+		return "", errors.New("工作台公开地址配置无效")
+	}
+	requestHost := requestHostname(c)
+	if requestHost == "" {
+		return "", errors.New("工作台请求主机无效")
+	}
+	if origin := strings.TrimSpace(c.GetHeader("Origin")); origin != "" {
+		originURL, originErr := url.Parse(origin)
+		if originErr != nil || !strings.EqualFold(originURL.Hostname(), requestHost) {
+			return "", errors.New("工作台请求来源与访问主机不一致")
+		}
+	}
+	if port := baseURL.Port(); port != "" {
+		baseURL.Host = net.JoinHostPort(requestHost, port)
+	} else {
+		baseURL.Host = requestHost
+	}
+	return strings.TrimRight(baseURL.String(), "/"), nil
+}
+
+func workbenchTargetForRequest(c *gin.Context, provider, target string) (string, error) {
+	base, err := workbenchBaseForRequest(c, provider)
+	if err != nil {
+		return "", err
+	}
+	baseURL, _ := url.Parse(base)
+	targetURL, targetErr := url.Parse(target)
+	if targetErr != nil || targetURL.Path == "" && targetURL.RawQuery == "" {
+		return "", errors.New("工作台目标地址无效")
+	}
+	targetURL.Scheme, targetURL.Host = baseURL.Scheme, baseURL.Host
+	return targetURL.String(), nil
+}
+
+func allowedWorkbenchRedirect(c *gin.Context, provider, target string) bool {
+	base := configuredWorkbenchBase(provider)
 	baseURL, baseErr := url.Parse(strings.TrimRight(base, "/"))
 	targetURL, targetErr := url.Parse(target)
 	return baseErr == nil && targetErr == nil &&
 		(baseURL.Scheme == "http" || baseURL.Scheme == "https") &&
-		targetURL.Scheme == baseURL.Scheme && targetURL.Host == baseURL.Host
+		targetURL.Scheme == baseURL.Scheme &&
+		targetURL.Port() == baseURL.Port() &&
+		strings.EqualFold(targetURL.Hostname(), requestHostname(c))
 }
 
-func (h *Handler) createWorkbenchLaunch(provider string, project Project, userID uint64, resourceType string, resourceID uint64, target string) (string, error) {
+func (h *Handler) createWorkbenchLaunch(c *gin.Context, provider string, project Project, userID uint64, resourceType string, resourceID uint64, target string) (string, error) {
 	provider = strings.ToUpper(strings.TrimSpace(provider))
-	if !allowedWorkbenchRedirect(provider, target) {
+	target, err := workbenchTargetForRequest(c, provider, target)
+	if err != nil || !allowedWorkbenchRedirect(c, provider, target) {
 		return "", errors.New("工作台重定向地址不受信任")
 	}
 	token, err := randomSecret(32)
@@ -74,14 +128,12 @@ func (h *Handler) createWorkbenchLaunch(provider string, project Project, userID
 	if err != nil {
 		return "", err
 	}
-	cfg := config.Load()
-	base := cfg.FiftyOnePublicURL
 	path := "/admin-api/ai-platform/workbench-sso/fiftyone"
 	if provider == "CVAT" {
-		base = cfg.CVATPublicURL
 		path = "/admin-api/ai-platform/workbench-sso/cvat"
 	}
-	return strings.TrimRight(base, "/") + path + "?" + workbenchTicketQueryName + "=" + url.QueryEscape(token), nil
+	targetURL, _ := url.Parse(target)
+	return targetURL.Scheme + "://" + targetURL.Host + path + "?" + workbenchTicketQueryName + "=" + url.QueryEscape(token), nil
 }
 
 func (h *Handler) consumeWorkbenchTicket(token, provider string) (WorkbenchTicket, error) {
@@ -164,7 +216,7 @@ func verifyWorkbenchSession(value, provider string) (workbenchSessionClaims, err
 // @Router /ai-platform/workbench-sso/cvat [get]
 func (h *Handler) WorkbenchSSOCVAT(c *gin.Context) {
 	ticket, err := h.consumeWorkbenchTicket(c.Query(workbenchTicketQueryName), "CVAT")
-	if err != nil || !allowedWorkbenchRedirect("CVAT", ticket.RedirectURL) {
+	if err != nil || !allowedWorkbenchRedirect(c, "CVAT", ticket.RedirectURL) {
 		c.String(http.StatusUnauthorized, "CVAT 工作台链接已失效，请返回 VisionAI 重新打开。")
 		return
 	}
@@ -202,7 +254,7 @@ func (h *Handler) WorkbenchSSOCVAT(c *gin.Context) {
 // @Router /ai-platform/workbench-sso/fiftyone [get]
 func (h *Handler) WorkbenchSSOFiftyOne(c *gin.Context) {
 	ticket, err := h.consumeWorkbenchTicket(c.Query(workbenchTicketQueryName), "FIFTYONE")
-	if err != nil || !allowedWorkbenchRedirect("FIFTYONE", ticket.RedirectURL) {
+	if err != nil || !allowedWorkbenchRedirect(c, "FIFTYONE", ticket.RedirectURL) {
 		c.String(http.StatusUnauthorized, "FiftyOne 工作台链接已失效，请返回 VisionAI 重新打开。")
 		return
 	}

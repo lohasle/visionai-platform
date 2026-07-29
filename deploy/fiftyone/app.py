@@ -9,6 +9,7 @@ import fiftyone as fo
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from PIL import Image
 from pydantic import BaseModel, Field
 
 
@@ -46,8 +47,48 @@ class DatasetRequest(BaseModel):
     samples: list[Sample]
 
 
+class SimilaritySample(BaseModel):
+    assetId: int
+    filename: str
+    sourceUrl: str
+
+
+class SimilarityRequest(BaseModel):
+    name: str
+    projectId: int
+    distanceThreshold: int = Field(default=6, ge=0, le=32)
+    samples: list[SimilaritySample]
+
+
 def safe_name(value: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_.-]", "_", value)
+
+
+def media_request(value, client):
+    source = urlsplit(value)
+    media_endpoint = os.getenv("FIFTYONE_MEDIA_ENDPOINT", "")
+    request_url = value
+    headers = {}
+    if media_endpoint:
+        request_url = urlunsplit(
+            (source.scheme, media_endpoint, source.path, source.query, source.fragment)
+        )
+        headers["host"] = source.netloc
+    return client.get(request_url, headers=headers)
+
+
+def average_hash(path):
+    with Image.open(path) as image:
+        pixels = list(image.convert("L").resize((8, 8), Image.Resampling.LANCZOS).getdata())
+    mean = sum(pixels) / len(pixels)
+    value = 0
+    for pixel in pixels:
+        value = (value << 1) | int(pixel >= mean)
+    return f"{value:016x}"
+
+
+def hamming(left, right):
+    return (int(left, 16) ^ int(right, 16)).bit_count()
 
 
 def labels(values: list[Detection], predictions: bool = False):
@@ -121,14 +162,7 @@ def sync_dataset(dataset_name: str, request: DatasetRequest):
         with httpx.Client(timeout=60, follow_redirects=True) as client:
             for value in request.samples:
                 target = media_dir / f"{value.assetId}.png"
-                source = urlsplit(value.sourceUrl)
-                media_endpoint = os.getenv("FIFTYONE_MEDIA_ENDPOINT", "")
-                request_url = value.sourceUrl
-                headers = {}
-                if media_endpoint:
-                    request_url = urlunsplit((source.scheme, media_endpoint, source.path, source.query, source.fragment))
-                    headers["host"] = source.netloc
-                response = client.get(request_url, headers=headers)
+                response = media_request(value.sourceUrl, client)
                 response.raise_for_status()
                 target.write_bytes(response.content)
                 sample = fo.Sample(filepath=str(target))
@@ -148,6 +182,93 @@ def sync_dataset(dataset_name: str, request: DatasetRequest):
         dataset.save()
         ensure_session(dataset)
         return {"name": dataset.name, "sampleCount": len(dataset)}
+
+
+@api.post("/similarity")
+def analyze_similarity(request: SimilarityRequest):
+    global session
+    if not request.samples:
+        raise HTTPException(400, "similarity analysis requires samples")
+    with lock:
+        if fo.dataset_exists(request.name):
+            if session is not None and session.dataset is not None and session.dataset.name == request.name:
+                session.dataset = None
+            fo.delete_dataset(request.name)
+        dataset = fo.Dataset(request.name, persistent=True)
+        media_dir = ROOT / safe_name(request.name)
+        media_dir.mkdir(parents=True, exist_ok=True)
+        hashes = {}
+        rows = []
+        with httpx.Client(timeout=60, follow_redirects=True) as client:
+            for value in request.samples:
+                suffix = pathlib.Path(value.filename).suffix.lower()
+                if suffix not in {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}:
+                    suffix = ".img"
+                target = media_dir / f"{value.assetId}{suffix}"
+                response = media_request(value.sourceUrl, client)
+                response.raise_for_status()
+                target.write_bytes(response.content)
+                perceptual_hash = average_hash(target)
+                hashes[value.assetId] = perceptual_hash
+                sample = fo.Sample(filepath=str(target))
+                sample["asset_id"] = value.assetId
+                sample["project_id"] = request.projectId
+                sample["perceptual_hash"] = perceptual_hash
+                rows.append(sample)
+
+        parents = {asset_id: asset_id for asset_id in hashes}
+
+        def find(asset_id):
+            while parents[asset_id] != asset_id:
+                parents[asset_id] = parents[parents[asset_id]]
+                asset_id = parents[asset_id]
+            return asset_id
+
+        def union(left, right):
+            left_root, right_root = find(left), find(right)
+            if left_root != right_root:
+                parents[max(left_root, right_root)] = min(left_root, right_root)
+
+        asset_ids = sorted(hashes)
+        for index, left in enumerate(asset_ids):
+            for right in asset_ids[index + 1 :]:
+                if hamming(hashes[left], hashes[right]) <= request.distanceThreshold:
+                    union(left, right)
+        grouped = {}
+        for asset_id in asset_ids:
+            grouped.setdefault(find(asset_id), []).append(asset_id)
+        groups = []
+        group_by_asset = {}
+        for values in grouped.values():
+            if len(values) < 2:
+                continue
+            canonical = min(values)
+            for asset_id in values:
+                group_by_asset[asset_id] = canonical
+            groups.append(
+                {
+                    "canonicalAssetId": canonical,
+                    "assetIds": values,
+                    "hashes": {str(asset_id): hashes[asset_id] for asset_id in values},
+                }
+            )
+        for sample in rows:
+            sample["near_duplicate_of"] = group_by_asset.get(sample["asset_id"])
+        dataset.add_samples(rows)
+        dataset.info = {
+            "projectId": request.projectId,
+            "distanceThreshold": request.distanceThreshold,
+            "groupCount": len(groups),
+            "algorithm": "64-bit perceptual average hash",
+        }
+        dataset.save()
+        ensure_session(dataset)
+        return {
+            "name": request.name,
+            "analyzedCount": len(rows),
+            "groups": groups,
+            "hashes": {str(asset_id): value for asset_id, value in hashes.items()},
+        }
 
 
 if __name__ == "__main__":

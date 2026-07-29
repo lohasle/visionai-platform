@@ -135,8 +135,8 @@ func (h *Handler) RoleUpdate(c *gin.Context) {
 		httpx.Fail(c, 404, 404, "角色不存在")
 		return
 	}
-	if row.Code == "super_admin" && req.Code != row.Code {
-		httpx.Fail(c, 400, 400, "超级管理员标识不可修改")
+	if row.Type == 1 && req.Code != row.Code {
+		httpx.Fail(c, 400, 400, "系统内置角色标识不可修改")
 		return
 	}
 	applyRole(&row, req)
@@ -167,9 +167,9 @@ func (h *Handler) RoleDeleteList(c *gin.Context) { h.deleteRoles(c, splitIDs(c.Q
 
 func (h *Handler) deleteRoles(c *gin.Context, ids []uint64) {
 	var protected int64
-	h.service.db.Model(&Role{}).Where("tenant_id = ? AND id IN ? AND code = ?", tenantIDFromContext(c), ids, "super_admin").Count(&protected)
+	h.service.db.Model(&Role{}).Where("tenant_id = ? AND id IN ? AND type = ?", tenantIDFromContext(c), ids, 1).Count(&protected)
 	if protected > 0 {
-		httpx.Fail(c, 400, 400, "超级管理员角色不可删除")
+		httpx.Fail(c, 400, 400, "系统内置角色不可删除，可在角色管理中停用")
 		return
 	}
 	tx := h.service.db.Begin()

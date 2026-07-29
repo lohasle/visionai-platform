@@ -50,11 +50,7 @@ func validateRegressionImage(input []byte) (format string, width, height int, sh
 	return format, cfg.Width, cfg.Height, hex.EncodeToString(sum[:]), nil
 }
 
-func evaluateRegression(detections []struct {
-	Label      string    `json:"label"`
-	Confidence float64   `json:"confidence"`
-	BBox       []float64 `json:"bbox"`
-}, expectedLabel string, minimumConfidence float64) regressionResult {
+func evaluateRegression(detections []platforminference.Detection, expectedLabel string, minimumConfidence float64) regressionResult {
 	expectedLabel = strings.TrimSpace(expectedLabel)
 	result := regressionResult{
 		Status: "NOT_ASSERTED", ExpectedLabel: expectedLabel,
@@ -210,7 +206,7 @@ func (h *Handler) DeploymentPredictImage(c *gin.Context) {
 		}
 		h.db.Create(&trace)
 		evaluateAlertRules(h.db, trace)
-		captureFeedback(h.db, trace)
+		captureFeedback(h, trace)
 		_ = appendAudit(h.db, c, project.ID, "INFERENCE_IMAGE_TEST_FAILED", "INFERENCE_TRACE", trace.ID, nil, gin.H{"traceId": traceID, "sourceSha256": sourceHash})
 		httpx.Fail(c, http.StatusBadGateway, 502, "推理服务失败："+predictErr.Error())
 		return
@@ -230,7 +226,7 @@ func (h *Handler) DeploymentPredictImage(c *gin.Context) {
 		return
 	}
 	evaluateAlertRules(h.db, trace)
-	captureFeedback(h.db, trace)
+	captureFeedback(h, trace)
 	_ = appendAudit(h.db, c, project.ID, "INFERENCE_IMAGE_TESTED", "INFERENCE_TRACE", trace.ID, nil, gin.H{
 		"traceId": traceID, "sourceSha256": sourceHash, "regressionStatus": regression.Status,
 	})

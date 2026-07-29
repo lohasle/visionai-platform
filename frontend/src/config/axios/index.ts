@@ -6,10 +6,11 @@ const { default_headers } = config
 
 const request = (option: any) => {
   const { headersType, headers, ...otherOption } = option
+  const isFormData = typeof FormData !== 'undefined' && otherOption.data instanceof FormData
   return service({
     ...otherOption,
     headers: {
-      'Content-Type': headersType || default_headers,
+      ...(isFormData ? {} : { 'Content-Type': headersType || default_headers }),
       ...headers
     }
   })
@@ -43,5 +44,9 @@ export default {
     option.headersType = 'multipart/form-data'
     const res = await request({ method: 'POST', ...option })
     return res as unknown as Promise<T>
+  },
+  postMultipart: async <T = any>(option: any) => {
+    const res = await request({ method: 'POST', ...option })
+    return res.data as unknown as T
   }
 }

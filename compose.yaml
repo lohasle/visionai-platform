@@ -42,30 +42,37 @@ x-cvat-worker: &cvat-worker
     start_period: 30s
 
 x-visionai-app-env: &visionai-app-env
+  NIMBUS_ENVIRONMENT: ${NIMBUS_ENVIRONMENT:-DEVELOPMENT}
+  NIMBUS_ENABLE_PRODUCTION_LOCAL_DOCKER: ${NIMBUS_ENABLE_PRODUCTION_LOCAL_DOCKER:-false}
   NIMBUS_HTTP_ADDR: ":58080"
   NIMBUS_DB_DSN: "nimbus:nimbus_dev@tcp(mysql:3306)/nimbus_platform_go?charset=utf8mb4&parseTime=True&loc=Local"
   NIMBUS_RABBITMQ_URL: "amqp://visionai:visionai_dev@rabbitmq:5672/"
   NIMBUS_EVENT_EXCHANGE: visionai.events
   NIMBUS_EVENT_QUEUE: visionai.domain-events.v1
   NIMBUS_S3_ENDPOINT: minio:9000
-  NIMBUS_S3_PUBLIC_ENDPOINT: localhost:29000
+  NIMBUS_S3_PUBLIC_ENDPOINT: ${VISIONAI_PUBLIC_HOST:-localhost}:29000
   NIMBUS_S3_ACCESS_KEY: visionai
   NIMBUS_S3_SECRET_KEY: visionai_minio_dev
   NIMBUS_S3_BUCKET: visionai-assets
   NIMBUS_S3_SECURE: "false"
   NIMBUS_IMPORT_ROOT: /imports
   NIMBUS_CVAT_BASE_URL: http://cvat-gateway:8080
-  NIMBUS_CVAT_PUBLIC_URL: http://localhost:28080
+  NIMBUS_CVAT_PUBLIC_URL: http://${VISIONAI_PUBLIC_HOST:-localhost}:28080
   NIMBUS_CVAT_USERNAME: visionai
   NIMBUS_CVAT_PASSWORD: visionai_cvat_dev
   NIMBUS_TRAINING_WORK_ROOT: /training-work
   NIMBUS_DOCKER_BINARY: docker
   NIMBUS_DOCKER_VOLUMES_FROM: visionai-orchestrator
+  NIMBUS_DOCKER_NETWORK: nimbus-framework-go_default
   NIMBUS_FIFTYONE_API_URL: http://fiftyone:5152
-  NIMBUS_FIFTYONE_PUBLIC_URL: http://localhost:25151
+  NIMBUS_FIFTYONE_PUBLIC_URL: http://${VISIONAI_PUBLIC_HOST:-localhost}:25151
   NIMBUS_FIFTYONE_MEDIA_HOST: host.docker.internal:29000
+  NIMBUS_CLEARML_API_URL: http://clearml-apiserver:8008
+  NIMBUS_CLEARML_WEB_URL: http://${VISIONAI_PUBLIC_HOST:-localhost}:8080
+  NIMBUS_CLEARML_ACCESS_KEY: ${NIMBUS_CLEARML_ACCESS_KEY:-visionai-clearml-api-key}
+  NIMBUS_CLEARML_SECRET_KEY: ${NIMBUS_CLEARML_SECRET_KEY:-visionai-clearml-api-secret-development}
   NIMBUS_INFERENCE_API_URL: http://inference:8000
-  NIMBUS_INFERENCE_PUBLIC_URL: http://localhost:28000
+  NIMBUS_INFERENCE_PUBLIC_URL: http://${VISIONAI_PUBLIC_HOST:-localhost}:28000
   NIMBUS_JWT_SECRET: ${NIMBUS_JWT_SECRET:-visionai-local-development-secret}
   NIMBUS_BOOTSTRAP_TENANT: ${NIMBUS_BOOTSTRAP_TENANT:-Nimbus Framework}
   NIMBUS_BOOTSTRAP_USERNAME: ${NIMBUS_BOOTSTRAP_USERNAME:-admin}
@@ -83,9 +90,7 @@ services:
     ports:
       - "58080:58080"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - visionai-imports:/imports
-      - visionai-training-work:/training-work
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -242,6 +247,20 @@ services:
       retries: 3
     restart: unless-stopped
 
+  trainer-gpu:
+    build:
+      context: .
+      dockerfile: deploy/trainer-gpu/Dockerfile
+    image: visionai/trainer-gpu:cuda12.6
+    profiles: ["gpu"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
   fiftyone:
     build:
       context: .
@@ -275,8 +294,14 @@ services:
     container_name: visionai-fiftyone-gateway
     ports:
       - "25151:8080"
+    environment:
+      VISIONAI_FRAME_ANCESTORS: "'self' http://localhost:48080 http://127.0.0.1:48080 ${VISIONAI_WORKBENCH_ORIGIN:-http://localhost:48080} http://${VISIONAI_PUBLIC_HOST:-localhost}:48080"
+    command:
+      - /bin/sh
+      - -c
+      - envsubst '$$VISIONAI_FRAME_ANCESTORS' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && exec nginx -g 'daemon off;'
     volumes:
-      - ./deploy/fiftyone-gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/fiftyone-gateway/nginx.conf:/etc/nginx/nginx.conf.template:ro
     depends_on:
       fiftyone:
         condition: service_healthy
@@ -293,12 +318,28 @@ services:
     build:
       context: .
       dockerfile: deploy/inference/Dockerfile
-    image: visionai/inference:1.0.0
+    image: visionai/inference:2.0.0
     container_name: visionai-inference
+    environment:
+      VISIONAI_INFERENCE_DEVICE: cuda
+      VISIONAI_S3_ENDPOINT: minio:9000
+      VISIONAI_S3_ACCESS_KEY: visionai
+      VISIONAI_S3_SECRET_KEY: visionai_minio_dev
+      VISIONAI_S3_SECURE: "false"
     ports:
       - "28000:8000"
     volumes:
       - visionai-inference-state:/state
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      minio:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 10s
@@ -401,7 +442,7 @@ services:
       traefik.http.routers.cvat-api.entrypoints: web
       traefik.http.routers.cvat-api.middlewares: cvat-visionai-embed
       traefik.http.middlewares.cvat-visionai-embed.headers.customresponseheaders.X-Frame-Options: ""
-      traefik.http.middlewares.cvat-visionai-embed.headers.contentsecuritypolicy: "frame-ancestors 'self' ${VISIONAI_WORKBENCH_ORIGIN:-http://localhost:48080} http://127.0.0.1:48080"
+      traefik.http.middlewares.cvat-visionai-embed.headers.contentsecuritypolicy: "frame-ancestors 'self' http://localhost:48080 http://127.0.0.1:48080 ${VISIONAI_WORKBENCH_ORIGIN:-http://localhost:48080} http://${VISIONAI_PUBLIC_HOST:-localhost}:48080"
     volumes:
       - visionai-cvat-data:/home/django/data
       - visionai-cvat-keys:/home/django/keys
@@ -517,6 +558,252 @@ services:
       - visionai-cvat
     restart: "no"
 
+  clearml-elasticsearch:
+    image: elasticsearch:8.19.9
+    container_name: visionai-clearml-elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      bootstrap.memory_lock: "true"
+      cluster.name: visionai-clearml
+      node.name: visionai-clearml
+      cluster.routing.allocation.disk.watermark.low: 500mb
+      cluster.routing.allocation.disk.watermark.high: 500mb
+      cluster.routing.allocation.disk.watermark.flood_stage: 500mb
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - visionai-clearml-elasticsearch:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow >/dev/null",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 40
+      start_period: 45s
+    restart: unless-stopped
+
+  clearml-mongo:
+    image: mongo:8.0.15
+    container_name: visionai-clearml-mongo
+    command: --setParameter internalQueryMaxBlockingSortMemoryUsageBytes=196100200
+    volumes:
+      - visionai-clearml-mongo:/data/db
+      - visionai-clearml-mongo-config:/data/configdb
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  clearml-redis:
+    image: redis:8.2.3
+    container_name: visionai-clearml-redis
+    volumes:
+      - visionai-clearml-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  clearml-fileserver:
+    image: clearml/server:2.4.0
+    container_name: visionai-clearml-fileserver
+    command: fileserver
+    environment:
+      CLEARML__fileserver__delete__allow_batch: "true"
+      CLEARML__fileserver__auth__enabled: "false"
+    ports:
+      - "8081:8081"
+    volumes:
+      - visionai-clearml-files:/mnt/fileserver
+      - visionai-clearml-logs:/var/log/clearml
+    networks:
+      default:
+        aliases:
+          - fileserver
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 40
+      start_period: 30s
+    restart: unless-stopped
+
+  clearml-apiserver:
+    image: clearml/server:2.4.0
+    container_name: visionai-clearml-apiserver
+    command: apiserver
+    environment:
+      CLEARML_ELASTIC_SERVICE_HOST: clearml-elasticsearch
+      CLEARML_ELASTIC_SERVICE_PORT: "9200"
+      CLEARML_MONGODB_SERVICE_HOST: clearml-mongo
+      CLEARML_MONGODB_SERVICE_PORT: "27017"
+      CLEARML_REDIS_SERVICE_HOST: clearml-redis
+      CLEARML_REDIS_SERVICE_PORT: "6379"
+      CLEARML_SERVER_DEPLOYMENT_TYPE: docker
+      CLEARML__apiserver__pre_populate__enabled: "true"
+      CLEARML__apiserver__pre_populate__zip_files: /opt/clearml/db-pre-populate
+      CLEARML__apiserver__pre_populate__artifacts_path: /mnt/fileserver
+      CLEARML__secure__credentials__apiserver__user_key: ${NIMBUS_CLEARML_ACCESS_KEY:-visionai-clearml-api-key}
+      CLEARML__secure__credentials__apiserver__user_secret: ${NIMBUS_CLEARML_SECRET_KEY:-visionai-clearml-api-secret-development}
+      CLEARML__secure__credentials__webserver__user_key: visionai-clearml-web-key
+      CLEARML__secure__credentials__webserver__user_secret: visionai-clearml-web-secret-development
+      CLEARML__secure__http__session_secret__apiserver: visionai-clearml-session-secret-development
+      CLEARML__secure__auth__token_secret: visionai-clearml-token-secret-development
+    ports:
+      - "8008:8008"
+    volumes:
+      - visionai-clearml-files:/mnt/fileserver
+      - visionai-clearml-logs:/var/log/clearml
+      - ./deploy/clearml/apiserver.conf:/opt/clearml/config/apiserver.conf:ro
+    networks:
+      default:
+        aliases:
+          - apiserver
+    depends_on:
+      clearml-elasticsearch:
+        condition: service_healthy
+      clearml-mongo:
+        condition: service_healthy
+      clearml-redis:
+        condition: service_healthy
+      clearml-fileserver:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8008/debug.ping', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 50
+      start_period: 45s
+    restart: unless-stopped
+
+  clearml-webserver:
+    image: clearml/server:2.4.0
+    container_name: visionai-clearml-webserver
+    command: webserver
+    environment:
+      CLEARML_API_HOST: http://${VISIONAI_PUBLIC_HOST:-localhost}:8008
+      CLEARML_FILES_HOST: http://${VISIONAI_PUBLIC_HOST:-localhost}:8081
+    ports:
+      - "8080:80"
+    depends_on:
+      clearml-apiserver:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  clearml-agent-gpu:
+    build:
+      context: .
+      dockerfile: deploy/clearml-agent/Dockerfile
+    image: visionai/clearml-agent:3.0.3
+    container_name: visionai-clearml-agent-gpu
+    command:
+      - daemon
+      - --queue
+      - gpu-local
+      - --create-queue
+      - --docker
+      - --force-current-version
+      - --foreground
+      - --gpus
+      - all
+    environment:
+      CLEARML_API_HOST: http://clearml-apiserver:8008
+      CLEARML_WEB_HOST: http://clearml-webserver
+      CLEARML_FILES_HOST: http://clearml-fileserver:8081
+      CLEARML_API_ACCESS_KEY: ${NIMBUS_CLEARML_ACCESS_KEY:-visionai-clearml-api-key}
+      CLEARML_API_SECRET_KEY: ${NIMBUS_CLEARML_SECRET_KEY:-visionai-clearml-api-secret-development}
+      CLEARML_WORKER_ID: visionai-clearml-gpu-rtx3060
+      CLEARML_AGENT_TEMP_STDOUT_FILE_DIR: /var/lib/docker/volumes/nimbus-framework-go_visionai-training-work/_data/clearml-agent
+      TMPDIR: /var/lib/docker/volumes/nimbus-framework-go_visionai-training-work/_data/clearml-agent
+      NVIDIA_VISIBLE_DEVICES: all
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - visionai-clearml-agent-cache:/root/.clearml
+      - visionai-training-work:/var/lib/docker/volumes/nimbus-framework-go_visionai-training-work/_data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      clearml-apiserver:
+        condition: service_healthy
+    restart: unless-stopped
+
+  clearml-agent-cpu:
+    build:
+      context: .
+      dockerfile: deploy/clearml-agent/Dockerfile
+    image: visionai/clearml-agent:3.0.3
+    container_name: visionai-clearml-agent-cpu
+    command:
+      - daemon
+      - --queue
+      - cpu-local
+      - --create-queue
+      - --docker
+      - --force-current-version
+      - --foreground
+      - --cpu-only
+    environment:
+      CLEARML_API_HOST: http://clearml-apiserver:8008
+      CLEARML_WEB_HOST: http://clearml-webserver
+      CLEARML_FILES_HOST: http://clearml-fileserver:8081
+      CLEARML_API_ACCESS_KEY: ${NIMBUS_CLEARML_ACCESS_KEY:-visionai-clearml-api-key}
+      CLEARML_API_SECRET_KEY: ${NIMBUS_CLEARML_SECRET_KEY:-visionai-clearml-api-secret-development}
+      CLEARML_WORKER_ID: visionai-clearml-cpu
+      CLEARML_AGENT_TEMP_STDOUT_FILE_DIR: /var/lib/docker/volumes/nimbus-framework-go_visionai-training-work/_data/clearml-agent
+      TMPDIR: /var/lib/docker/volumes/nimbus-framework-go_visionai-training-work/_data/clearml-agent
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - visionai-clearml-agent-cache:/root/.clearml
+      - visionai-training-work:/var/lib/docker/volumes/nimbus-framework-go_visionai-training-work/_data
+    depends_on:
+      clearml-apiserver:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   nimbus-go-mysql-data:
   visionai-rabbitmq-data:
@@ -531,6 +818,13 @@ volumes:
   visionai-inference-state:
   visionai-imports:
   visionai-training-work:
+  visionai-clearml-elasticsearch:
+  visionai-clearml-mongo:
+  visionai-clearml-mongo-config:
+  visionai-clearml-redis:
+  visionai-clearml-files:
+  visionai-clearml-logs:
+  visionai-clearml-agent-cache:
 
 networks:
   visionai-cvat:

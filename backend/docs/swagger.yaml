@@ -673,6 +673,11 @@ definitions:
     - password
     - username
     type: object
+  internal_modules_visionai.memberRequest:
+    properties:
+      userId:
+        type: integer
+    type: object
 info:
   contact: {}
   description: 'Go modular-monolith scaffold for operations platforms. Default database:
@@ -680,6 +685,29 @@ info:
   title: Nimbus Framework Go API
   version: "1.0"
 paths:
+  /ai-platform/approval-templates:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: List tenant approval workflow templates
+      tags:
+      - VisionAI Model Governance
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Create a tenant sequential approval workflow template
+      tags:
+      - VisionAI Model Governance
   /ai-platform/cvat-user-mappings:
     get:
       responses: {}
@@ -709,6 +737,65 @@ paths:
       summary: VisionAI dashboard summary
       tags:
       - VisionAI Workbench
+  /ai-platform/integrations/{instanceId}/revisions:
+    get:
+      parameters:
+      - description: Integration instance ID
+        in: path
+        name: instanceId
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: List immutable configuration backup, smoke and rollback revisions
+      tags:
+      - VisionAI Operations
+  /ai-platform/integrations/{instanceId}/test:
+    post:
+      parameters:
+      - description: Integration instance ID
+        in: path
+        name: instanceId
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Test an integration using its provider-internal health endpoint
+      tags:
+      - VisionAI Operations
+  /ai-platform/integrations/{instanceId}/upgrade:
+    post:
+      parameters:
+      - description: Integration instance ID
+        in: path
+        name: instanceId
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Upgrade an integration with compatibility gate, smoke test and automatic
+        rollback
+      tags:
+      - VisionAI Operations
   /ai-platform/jobs:
     get:
       produces:
@@ -817,6 +904,29 @@ paths:
       summary: Update project
       tags:
       - VisionAI Project
+  /ai-platform/projects/{id}/alerts/{alertId}/resolve:
+    post:
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Alert event ID
+        in: path
+        name: alertId
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Resolve an active alert with a disposition
+      tags:
+      - VisionAI Deployment
   /ai-platform/projects/{id}/annotation-tasks:
     get:
       responses: {}
@@ -904,6 +1014,52 @@ paths:
       summary: Authorize and audit opening the CVAT workbench
       tags:
       - VisionAI Annotation
+  /ai-platform/projects/{id}/approvals/{approvalId}/cancel:
+    post:
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Approval request ID
+        in: path
+        name: approvalId
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Cancel a pending approval request with an immutable reason
+      tags:
+      - VisionAI Model Governance
+  /ai-platform/projects/{id}/approvals/{approvalId}/decision:
+    post:
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Approval request ID
+        in: path
+        name: approvalId
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Decide the current sequential approval step
+      tags:
+      - VisionAI Model Governance
   /ai-platform/projects/{id}/archive:
     post:
       responses:
@@ -1034,6 +1190,35 @@ paths:
       summary: Summarize project asset quality states
       tags:
       - VisionAI Asset
+  /ai-platform/projects/{id}/assets/similarity:
+    post:
+      parameters:
+      - description: 64-bit perceptual hash Hamming distance (0..32)
+        in: query
+        name: distanceThreshold
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Analyze project image similarity through FiftyOne
+      tags:
+      - VisionAI Asset
+  /ai-platform/projects/{id}/assets/tags:
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Add, replace, or remove governed tags on assets
+      tags:
+      - VisionAI Asset Tag
   /ai-platform/projects/{id}/clone:
     post:
       responses:
@@ -1070,6 +1255,17 @@ paths:
       tags:
       - VisionAI Asset
   /ai-platform/projects/{id}/collections/{collectionId}/assets:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Page assets inside a collection
+      tags:
+      - VisionAI Asset
     put:
       responses:
         "200":
@@ -1163,6 +1359,57 @@ paths:
       summary: Create a reproducible dataset version
       tags:
       - VisionAI Dataset
+  /ai-platform/projects/{id}/deployments/{deploymentId}/alert-rules/{ruleId}/silence:
+    post:
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Deployment ID
+        in: path
+        name: deploymentId
+        required: true
+        type: integer
+      - description: Alert rule ID
+        in: path
+        name: ruleId
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Silence an alert rule with an auditable reason
+      tags:
+      - VisionAI Deployment
+  /ai-platform/projects/{id}/deployments/{deploymentId}/drift-baseline:
+    post:
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Deployment ID
+        in: path
+        name: deploymentId
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Freeze a deployment drift baseline and configure its rolling window
+      tags:
+      - VisionAI Deployment
   /ai-platform/projects/{id}/deployments/{deploymentId}/predict-image:
     post:
       consumes:
@@ -1193,6 +1440,269 @@ paths:
       summary: Upload an image and run an online regression test
       tags:
       - VisionAI Deployment
+  /ai-platform/projects/{id}/evaluation-runs/{runId}/slices:
+    post:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Save a governed evaluation slice by category, size, scene, device,
+        time and confidence
+      tags:
+      - VisionAI Evaluation
+  /ai-platform/projects/{id}/feedback-benefits:
+    get:
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: List immutable feedback-loop benefit evaluations
+      tags:
+      - VisionAI Feedback
+    post:
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Compare closed-loop baseline and candidate quality and production metrics
+      tags:
+      - VisionAI Feedback
+  /ai-platform/projects/{id}/inference-traces/{traceId}/feedback:
+    post:
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Inference trace ID
+        in: path
+        name: traceId
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Add a production trace to the feedback loop manually
+      tags:
+      - VisionAI Feedback
+  /ai-platform/projects/{id}/model-versions/{versionId}/approvals:
+    post:
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Model version ID
+        in: path
+        name: versionId
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Freeze evidence and submit a model to a tenant approval workflow
+      tags:
+      - VisionAI Model Governance
+  /ai-platform/projects/{id}/model-versions/{versionId}/export:
+    post:
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Model version ID
+        in: path
+        name: versionId
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Export an approved model package with purpose and downloader audit
+      tags:
+      - VisionAI Model Governance
+  /ai-platform/projects/{id}/model-versions/{versionId}/licenses:
+    put:
+      parameters:
+      - description: Project ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Model version ID
+        in: path
+        name: versionId
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Replace and review the four model supply-chain license declarations
+      tags:
+      - VisionAI Model Governance
+  /ai-platform/projects/{id}/ontologies:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: List project ontologies
+      tags:
+      - VisionAI Ontology
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Create an ontology and its first draft
+      tags:
+      - VisionAI Ontology
+  /ai-platform/projects/{id}/ontologies/{ontologyId}:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Get an ontology and all versions
+      tags:
+      - VisionAI Ontology
+  /ai-platform/projects/{id}/ontologies/{ontologyId}/versions:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Create an editable ontology draft
+      tags:
+      - VisionAI Ontology
+  /ai-platform/projects/{id}/ontology-versions:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: List selectable ontology versions
+      tags:
+      - VisionAI Ontology
+  /ai-platform/projects/{id}/ontology-versions/{versionId}:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Get ontology version labels and attributes
+      tags:
+      - VisionAI Ontology
+  /ai-platform/projects/{id}/ontology-versions/{versionId}/deprecate:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Deprecate an ontology version for new work
+      tags:
+      - VisionAI Ontology
+  /ai-platform/projects/{id}/ontology-versions/{versionId}/labels:
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Replace all labels in a draft ontology version
+      tags:
+      - VisionAI Ontology
+  /ai-platform/projects/{id}/ontology-versions/{versionId}/publish:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Publish and lock an ontology version
+      tags:
+      - VisionAI Ontology
+  /ai-platform/projects/{id}/overview:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Get project lifecycle counts, risks and business timeline
+      tags:
+      - VisionAI Project
+  /ai-platform/projects/{id}/preannotations/compare:
+    get:
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: Compare pre-annotation model efficiency by task, category and scene
+      tags:
+      - VisionAI Annotation
   /ai-platform/projects/{id}/status:
     put:
       responses:
@@ -1205,6 +1715,41 @@ paths:
       summary: Activate or suspend a project
       tags:
       - VisionAI Project
+  /ai-platform/projects/{id}/tag-definitions:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: List governed asset tag definitions
+      tags:
+      - VisionAI Asset Tag
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Create a governed asset tag definition
+      tags:
+      - VisionAI Asset Tag
+  /ai-platform/projects/{id}/tag-definitions/{definitionId}:
+    put:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Update an asset tag definition
+      tags:
+      - VisionAI Asset Tag
   /ai-platform/projects/{id}/training-runs:
     get:
       responses: {}
@@ -1410,6 +1955,13 @@ paths:
       tags:
       - VisionAI Project
     put:
+      parameters:
+      - description: Project member
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_modules_visionai.memberRequest'
       responses:
         "200":
           description: OK
@@ -1417,7 +1969,7 @@ paths:
             $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
       security:
       - BearerAuth: []
-      summary: Add or update project member roles
+      summary: Add a project member whose roles are managed by System Management
       tags:
       - VisionAI Project
   /ai-platform/projects/{projectId}/members/{userId}:
@@ -1432,6 +1984,45 @@ paths:
       summary: Remove project member
       tags:
       - VisionAI Project
+  /ai-platform/resources/history:
+    get:
+      parameters:
+      - description: History window in hours (1..720)
+        in: query
+        name: hours
+        type: integer
+      - description: Compute node key
+        in: query
+        name: nodeKey
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Query tenant compute-resource time series
+      tags:
+      - VisionAI Operations
+  /ai-platform/sync-incidents/{incidentId}/action:
+    post:
+      parameters:
+      - description: Sync incident ID
+        in: path
+        name: incidentId
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_lohasle_nimbus-framework-go_internal_platform_httpx.Response'
+      security:
+      - BearerAuth: []
+      summary: Replay, rebind, ignore or manually close a synchronization incident
+      tags:
+      - VisionAI Operations
   /ai-platform/workbench-sso/cvat:
     get:
       produces:

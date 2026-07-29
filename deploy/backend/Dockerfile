@@ -8,7 +8,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/visionai-server ./
  && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/visionai-orchestrator ./cmd/orchestrator
 
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates tzdata docker-cli
+RUN apk add --no-cache ca-certificates tzdata docker-cli ffmpeg
 WORKDIR /app
 COPY --from=build /out/visionai-server /out/visionai-orchestrator /app/
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=30 \

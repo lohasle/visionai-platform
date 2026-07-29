@@ -26,7 +26,9 @@ type AnnotationTask struct {
 	Name               string           `gorm:"size:160;not null" json:"name"`
 	TaskType           string           `gorm:"size:40;not null" json:"taskType"`
 	CollectionID       uint64           `gorm:"index;not null" json:"collectionId"`
+	OntologyVersionID  uint64           `gorm:"index" json:"ontologyVersionId"`
 	OntologyVersion    string           `gorm:"size:80;not null" json:"ontologyVersion"`
+	OntologyChecksum   string           `gorm:"size:64" json:"ontologyChecksum"`
 	Labels             string           `gorm:"type:json;not null" json:"labels"`
 	AnnotatorIDs       string           `gorm:"type:json;not null" json:"annotatorIds"`
 	ReviewerIDs        string           `gorm:"type:json;not null" json:"reviewerIds"`
@@ -47,19 +49,21 @@ type AnnotationTask struct {
 }
 
 type AnnotationRevision struct {
-	ID               uint64    `gorm:"primaryKey" json:"id"`
-	TenantID         uint64    `gorm:"index;not null" json:"tenantId"`
-	ProjectID        uint64    `gorm:"index;not null" json:"projectId"`
-	AnnotationTaskID uint64    `gorm:"uniqueIndex:uk_annotation_revision;not null" json:"annotationTaskId"`
-	RevisionNo       int       `gorm:"uniqueIndex:uk_annotation_revision;not null" json:"revisionNo"`
-	SnapshotURI      string    `gorm:"size:1024;not null" json:"snapshotUri"`
-	ObjectKey        string    `gorm:"size:1024;not null" json:"-"`
-	Format           string    `gorm:"size:64;not null" json:"format"`
-	Checksum         string    `gorm:"size:64;index;not null" json:"checksum"`
-	CategoryMapping  string    `gorm:"type:json;not null" json:"categoryMapping"`
-	AnnotationCount  int64     `gorm:"not null" json:"annotationCount"`
-	ApprovedBy       uint64    `gorm:"index;not null" json:"approvedBy"`
-	CreatedAt        time.Time `json:"createTime"`
+	ID                uint64    `gorm:"primaryKey" json:"id"`
+	TenantID          uint64    `gorm:"index;not null" json:"tenantId"`
+	ProjectID         uint64    `gorm:"index;not null" json:"projectId"`
+	AnnotationTaskID  uint64    `gorm:"uniqueIndex:uk_annotation_revision;not null" json:"annotationTaskId"`
+	RevisionNo        int       `gorm:"uniqueIndex:uk_annotation_revision;not null" json:"revisionNo"`
+	SnapshotURI       string    `gorm:"size:1024;not null" json:"snapshotUri"`
+	ObjectKey         string    `gorm:"size:1024;not null" json:"-"`
+	Format            string    `gorm:"size:64;not null" json:"format"`
+	Checksum          string    `gorm:"size:64;index;not null" json:"checksum"`
+	CategoryMapping   string    `gorm:"type:json;not null" json:"categoryMapping"`
+	OntologyVersionID uint64    `gorm:"index" json:"ontologyVersionId"`
+	OntologyChecksum  string    `gorm:"size:64" json:"ontologyChecksum"`
+	AnnotationCount   int64     `gorm:"not null" json:"annotationCount"`
+	ApprovedBy        uint64    `gorm:"index;not null" json:"approvedBy"`
+	CreatedAt         time.Time `json:"createTime"`
 }
 
 type ExternalResourceBinding struct {
@@ -107,22 +111,29 @@ type WorkbenchTicket struct {
 }
 
 type PreannotationRun struct {
-	ID                uint64    `gorm:"primaryKey" json:"id"`
-	TenantID          uint64    `gorm:"index;not null" json:"tenantId"`
-	ProjectID         uint64    `gorm:"index;not null" json:"projectId"`
-	AnnotationTaskID  uint64    `gorm:"index;not null" json:"annotationTaskId"`
-	ModelVersionID    uint64    `gorm:"index;not null" json:"modelVersionId"`
-	Status            string    `gorm:"size:24;index;not null" json:"status"`
-	Parameters        string    `gorm:"type:json;not null" json:"parameters"`
-	IdempotencyKey    string    `gorm:"size:128;uniqueIndex;not null" json:"idempotencyKey"`
-	ProposedCount     int64     `json:"proposedCount"`
-	AcceptedCount     int64     `json:"acceptedCount"`
-	DeletedCount      int64     `json:"deletedCount"`
-	ModifiedCount     int64     `json:"modifiedCount"`
-	AddedCount        int64     `json:"addedCount"`
-	CorrectionSeconds int64     `json:"correctionSeconds"`
-	CreatedAt         time.Time `json:"createTime"`
-	UpdatedAt         time.Time `json:"updateTime"`
+	ID                uint64     `gorm:"primaryKey" json:"id"`
+	TenantID          uint64     `gorm:"index;not null" json:"tenantId"`
+	ProjectID         uint64     `gorm:"index;not null" json:"projectId"`
+	AnnotationTaskID  uint64     `gorm:"index;not null" json:"annotationTaskId"`
+	ModelVersionID    uint64     `gorm:"index;not null" json:"modelVersionId"`
+	Status            string     `gorm:"size:24;index;not null" json:"status"`
+	Parameters        string     `gorm:"type:json;not null" json:"parameters"`
+	IdempotencyKey    string     `gorm:"size:128;uniqueIndex;not null" json:"idempotencyKey"`
+	ProposedCount     int64      `json:"proposedCount"`
+	AcceptedCount     int64      `json:"acceptedCount"`
+	DeletedCount      int64      `json:"deletedCount"`
+	ModifiedCount     int64      `json:"modifiedCount"`
+	AddedCount        int64      `json:"addedCount"`
+	CorrectionSeconds int64      `json:"correctionSeconds"`
+	OutputSnapshot    string     `gorm:"type:longtext" json:"-"`
+	Breakdown         string     `gorm:"type:json;not null" json:"breakdown"`
+	Provider          string     `gorm:"size:32;not null;default:ORCHESTRATOR" json:"provider"`
+	ImportedAt        *time.Time `json:"importedAt"`
+	MetricsUpdatedAt  *time.Time `json:"metricsUpdatedAt"`
+	ErrorCode         string     `gorm:"size:128" json:"errorCode"`
+	ErrorMessage      string     `gorm:"size:1024" json:"errorMessage"`
+	CreatedAt         time.Time  `json:"createTime"`
+	UpdatedAt         time.Time  `json:"updateTime"`
 }
 
 func (AnnotationTask) TableName() string          { return "ai_annotation_task" }

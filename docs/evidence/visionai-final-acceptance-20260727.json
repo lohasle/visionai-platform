@@ -1,0 +1,96 @@
+{
+  "schemaVersion": "1.0",
+  "designBaseline": "VisionAI V1.3",
+  "requirements": {
+    "total": 134,
+    "verified": 134,
+    "other": 0
+  },
+  "dataset": {
+    "name": "COCO128",
+    "sourceUrl": "https://github.com/ultralytics/assets/releases/download/v0.0.0/coco128.zip",
+    "archiveSha256": "61e5e3028863d8ffc3b81d6a514603954889f0edd5e4b44c4ce60b2da99aeb8e",
+    "images": 128,
+    "yoloLabelFiles": 128,
+    "cvatShapes": 929
+  },
+  "lifecycle": {
+    "projectId": 33,
+    "assetImportId": 25,
+    "assetCount": 128,
+    "collectionId": 37,
+    "annotationTaskId": 35,
+    "cvatTaskId": 35,
+    "annotationRevisionId": 21,
+    "annotationCount": 929,
+    "datasetId": 20,
+    "datasetVersionId": 26,
+    "datasetStatus": "FROZEN",
+    "trainingRunId": 26,
+    "trainingStatus": "SUCCEEDED",
+    "evaluationRunId": 25,
+    "evaluationStatus": "SUCCEEDED",
+    "gateDecision": "PASSED",
+    "modelVersionId": 16,
+    "approvalId": 18,
+    "deploymentId": 14,
+    "deploymentStatus": "RUNNING",
+    "feedbackBatchId": 13,
+    "feedbackAnnotationTaskId": 36,
+    "feedbackStatus": "READY"
+  },
+  "gpu": {
+    "provider": "LOCAL_DOCKER",
+    "queue": "gpu-local",
+    "gpuCount": 1,
+    "gpuModel": "NVIDIA GeForce RTX 3060",
+    "gpuMemoryBytes": 12884377600,
+    "peakGpuMemoryBytes": 434267136,
+    "cudaRuntime": "12.6",
+    "framework": "torch-2.7.1+cu126/torchvision-0.22.1+cu126",
+    "architecture": "fasterrcnn_mobilenet_v3_large_320_fpn"
+  },
+  "governedTags": [
+    {
+      "id": 7,
+      "code": "benchmark",
+      "category": "BUSINESS",
+      "assetCount": 128
+    },
+    {
+      "id": 8,
+      "code": "daylight",
+      "category": "SCENE",
+      "assetCount": 128
+    },
+    {
+      "id": 9,
+      "code": "ultralytics-coco128",
+      "category": "SOURCE",
+      "assetCount": 128
+    }
+  ],
+  "datasetUsage": [
+    "TRAINING_RUN",
+    "EVALUATION_RUN",
+    "MODEL_VERSION",
+    "DEPLOYMENT"
+  ],
+  "supplyChainRegression": {
+    "projectCloneId": 35,
+    "compatibilityRuleId": 4,
+    "activeUpgradeRevisionId": 7,
+    "rollbackRevisionId": 8,
+    "incidentId": 24,
+    "invalidatedApprovalId": 19,
+    "finalApprovalId": 20,
+    "result": "PASSED"
+  },
+  "browserAudit": {
+    "routes": 13,
+    "mojibake": 0,
+    "loadErrors": 0,
+    "result": "PASSED"
+  },
+  "completedAt": "2026-07-27T11:53:20.7396285Z"
+}

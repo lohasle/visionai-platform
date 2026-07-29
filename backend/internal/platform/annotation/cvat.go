@@ -17,9 +17,19 @@ import (
 )
 
 type Label struct {
-	Name  string `json:"name"`
-	Color string `json:"color,omitempty"`
-	Type  string `json:"type,omitempty"`
+	ID         int64       `json:"id,omitempty"`
+	Name       string      `json:"name"`
+	Color      string      `json:"color,omitempty"`
+	Type       string      `json:"type,omitempty"`
+	Attributes []Attribute `json:"attributes,omitempty"`
+}
+
+type Attribute struct {
+	Name         string   `json:"name"`
+	InputType    string   `json:"input_type"`
+	Values       []string `json:"values"`
+	DefaultValue string   `json:"default_value,omitempty"`
+	Mutable      bool     `json:"mutable"`
 }
 
 type Media struct {
@@ -34,6 +44,11 @@ type Task struct {
 	Size       int64  `json:"size"`
 	Progress   int    `json:"progress"`
 	AssigneeID int64  `json:"assignee_id"`
+}
+
+type Project struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 type User struct {
@@ -58,6 +73,7 @@ type Provider interface {
 	CreateTask(context.Context, string, []Label, int) (Task, error)
 	AttachData(context.Context, int64, []Media) error
 	GetTask(context.Context, int64) (Task, error)
+	GetTaskLabels(context.Context, int64) ([]Label, error)
 	GetAnnotations(context.Context, int64) ([]byte, error)
 	PutAnnotations(context.Context, int64, []byte) error
 	TaskURL(int64) string
@@ -136,6 +152,46 @@ func (c *CVAT) CreateTask(ctx context.Context, name string, labels []Label, segm
 	return task, err
 }
 
+func (c *CVAT) CreateProject(ctx context.Context, name string, labels []Label) (Project, error) {
+	for index := range labels {
+		if labels[index].Type == "" {
+			labels[index].Type = "rectangle"
+		}
+	}
+	body, _ := json.Marshal(map[string]any{"name": name, "labels": labels})
+	resp, err := c.request(ctx, http.MethodPost, "/api/projects", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return Project{}, err
+	}
+	defer resp.Body.Close()
+	var project Project
+	if err = json.NewDecoder(resp.Body).Decode(&project); err != nil {
+		return Project{}, err
+	}
+	if project.ID == 0 {
+		return Project{}, errors.New("CVAT project creation returned no id")
+	}
+	return project, nil
+}
+
+func (c *CVAT) CreateTaskInProject(ctx context.Context, name string, projectID int64, segmentSize int) (Task, error) {
+	if projectID <= 0 {
+		return Task{}, errors.New("CVAT project id is required")
+	}
+	if segmentSize < 1 {
+		segmentSize = 50
+	}
+	body, _ := json.Marshal(map[string]any{"name": name, "project_id": projectID, "segment_size": segmentSize})
+	resp, err := c.request(ctx, http.MethodPost, "/api/tasks", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return Task{}, err
+	}
+	defer resp.Body.Close()
+	var task Task
+	err = json.NewDecoder(resp.Body).Decode(&task)
+	return task, err
+}
+
 func (c *CVAT) AttachData(ctx context.Context, taskID int64, media []Media) error {
 	if len(media) == 0 {
 		return errors.New("CVAT task requires at least one media file")
@@ -173,6 +229,24 @@ func (c *CVAT) GetTask(ctx context.Context, taskID int64) (Task, error) {
 	return task, err
 }
 
+func (c *CVAT) GetTaskLabels(ctx context.Context, taskID int64) ([]Label, error) {
+	resp, err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api/labels?task_id=%d&page_size=1000", taskID), "", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var page struct {
+		Results []Label `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		return nil, err
+	}
+	if len(page.Results) == 0 {
+		return nil, errors.New("CVAT task has no labels")
+	}
+	return page.Results, nil
+}
+
 func (c *CVAT) GetAnnotations(ctx context.Context, taskID int64) ([]byte, error) {
 	resp, err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api/tasks/%d/annotations", taskID), "", nil)
 	if err != nil {
@@ -192,6 +266,10 @@ func (c *CVAT) PutAnnotations(ctx context.Context, taskID int64, annotations []b
 
 func (c *CVAT) TaskURL(taskID int64) string {
 	return fmt.Sprintf("%s/tasks/%d", c.publicURL, taskID)
+}
+
+func (c *CVAT) ProjectURL(projectID int64) string {
+	return fmt.Sprintf("%s/projects/%d", c.publicURL, projectID)
 }
 
 func (c *CVAT) JobURL(taskID, jobID int64) string {

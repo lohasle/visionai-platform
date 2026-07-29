@@ -2,12 +2,10 @@ package visionai
 
 import "testing"
 
-func TestValidProjectRoles(t *testing.T) {
-	if !validRoles([]string{"ANNOTATOR", "REVIEWER"}) {
-		t.Fatal("known roles should be accepted")
-	}
-	if validRoles(nil) || validRoles([]string{"ROOT"}) {
-		t.Fatal("empty or unknown roles must be rejected")
+func TestNormalizedRoleCodes(t *testing.T) {
+	roles := normalizedRoleCodes([]string{" annotator ", "ANNOTATOR", "reviewer", ""})
+	if len(roles) != 2 || roles[0] != "ANNOTATOR" || roles[1] != "REVIEWER" {
+		t.Fatalf("unexpected normalized roles: %#v", roles)
 	}
 }
 

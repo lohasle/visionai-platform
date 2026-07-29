@@ -72,7 +72,17 @@ func markAnnotationFailure(db *gorm.DB, task *AnnotationTask, code string, err e
 func prepareCVATTask(ctx context.Context, db *gorm.DB, provider annotation.Provider, objectStore storage.Provider, task *AnnotationTask) error {
 	var annotatorIDs []uint64
 	if err := json.Unmarshal([]byte(task.AnnotatorIDs), &annotatorIDs); err != nil || len(annotatorIDs) == 0 {
-		return errors.New("annotation task has no valid annotators")
+		var project Project
+		if projectErr := db.Select("owner_user_id").Where(
+			"tenant_id = ? AND id = ?", task.TenantID, task.ProjectID,
+		).First(&project).Error; projectErr != nil || project.OwnerUserID == 0 {
+			return errors.New("annotation task has no valid annotators")
+		}
+		annotatorIDs = []uint64{project.OwnerUserID}
+		task.AnnotatorIDs = jsonValue(annotatorIDs)
+		if saveErr := db.Model(task).Update("annotator_ids", task.AnnotatorIDs).Error; saveErr != nil {
+			return fmt.Errorf("repair annotation task owner assignment: %w", saveErr)
+		}
 	}
 	identities, err := (&Handler{db: db}).ensureCVATIdentities(ctx, task.TenantID, annotatorIDs)
 	if err != nil {
@@ -100,7 +110,46 @@ func prepareCVATTask(ctx context.Context, db *gorm.DB, provider annotation.Provi
 		if err = provider.About(ctx); err != nil {
 			return fmt.Errorf("CVAT unavailable: %w", err)
 		}
-		external, err = provider.CreateTask(ctx, task.Name, labels, segmentSize)
+		if cvat, isCVAT := provider.(*annotation.CVAT); isCVAT {
+			bindingID := task.OntologyVersionID
+			internalType := "ONTOLOGY_VERSION"
+			if bindingID == 0 {
+				bindingID, internalType = task.ProjectID, "PROJECT"
+			}
+			var projectBinding ExternalResourceBinding
+			projectResult := db.Where(
+				"tenant_id = ? AND provider_type = ? AND internal_type = ? AND internal_id = ?",
+				task.TenantID, "CVAT", internalType, bindingID,
+			).First(&projectBinding)
+			var externalProjectID int64
+			if errors.Is(projectResult.Error, gorm.ErrRecordNotFound) {
+				var project Project
+				db.Where("tenant_id = ? AND id = ?", task.TenantID, task.ProjectID).First(&project)
+				externalProject, createErr := cvat.CreateProject(
+					ctx, fmt.Sprintf("%s · %s", project.Name, task.OntologyVersion), labels,
+				)
+				if createErr != nil {
+					return fmt.Errorf("create CVAT project: %w", createErr)
+				}
+				externalProjectID = externalProject.ID
+				projectBinding = ExternalResourceBinding{
+					TenantID: task.TenantID, ProviderType: "CVAT", InstanceID: "default",
+					InternalType: internalType, InternalID: bindingID, ExternalType: "PROJECT",
+					ExternalID:  strconv.FormatInt(externalProject.ID, 10),
+					ExternalURL: cvat.ProjectURL(externalProject.ID), SyncCursor: "READY",
+				}
+				if err = db.Create(&projectBinding).Error; err != nil {
+					return fmt.Errorf("save CVAT project binding: %w", err)
+				}
+			} else if projectResult.Error != nil {
+				return projectResult.Error
+			} else {
+				externalProjectID, _ = strconv.ParseInt(projectBinding.ExternalID, 10, 64)
+			}
+			external, err = cvat.CreateTaskInProject(ctx, task.Name, externalProjectID, segmentSize)
+		} else {
+			external, err = provider.CreateTask(ctx, task.Name, labels, segmentSize)
+		}
 		if err != nil {
 			return fmt.Errorf("create CVAT task: %w", err)
 		}
@@ -208,6 +257,10 @@ func exportAnnotationRevision(ctx context.Context, db *gorm.DB, provider annotat
 	}
 	sum := sha256.Sum256(raw)
 	checksum := hex.EncodeToString(sum[:])
+	categoryMapping, err := provider.GetTaskLabels(ctx, externalID)
+	if err != nil {
+		return fmt.Errorf("download CVAT category mapping: %w", err)
+	}
 	var latest AnnotationRevision
 	revisionNo := 1
 	if db.Where("tenant_id = ? AND annotation_task_id = ?", task.TenantID, task.ID).Order("revision_no DESC").First(&latest).Error == nil {
@@ -224,7 +277,8 @@ func exportAnnotationRevision(ctx context.Context, db *gorm.DB, provider annotat
 	revision := AnnotationRevision{
 		TenantID: task.TenantID, ProjectID: task.ProjectID, AnnotationTaskID: task.ID, RevisionNo: revisionNo,
 		SnapshotURI: objectStore.URI(objectKey), ObjectKey: objectKey, Format: "CVAT_JSON",
-		Checksum: checksum, CategoryMapping: task.Labels, AnnotationCount: countAnnotations(raw), ApprovedBy: task.CreatedBy,
+		Checksum: checksum, CategoryMapping: jsonValue(categoryMapping), OntologyVersionID: task.OntologyVersionID,
+		OntologyChecksum: task.OntologyChecksum, AnnotationCount: countAnnotations(raw), ApprovedBy: task.CreatedBy,
 	}
 	now := time.Now()
 	return db.Transaction(func(tx *gorm.DB) error {

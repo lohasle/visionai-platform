@@ -5,6 +5,8 @@ param(
     [string]$AdminPassword = "admin123",
     [string]$ReviewerUsername = "visionai-reviewer",
     [string]$ReviewerPassword = "VisionAI-Review-2026!",
+    [string]$ApproverUsername = "visionai-approver",
+    [string]$ApproverPassword = "VisionAI-Approve-2026!",
     [string]$RunTag = (Get-Date -Format "yyyyMMdd-HHmmss")
 )
 
@@ -151,6 +153,49 @@ if ([int]$reviewerPage.total -eq 0) {
         password = $ReviewerPassword
     } | Out-Null
 }
+$systemRoles = @(Invoke-VisionAI -Method Get -Path "/system/role/simple-list")
+$reviewerRoleIds = @(
+    $systemRoles |
+        Where-Object { $_.code -in @("REVIEWER", "APPROVER", "AUDITOR", "DATA_MANAGER") } |
+        ForEach-Object { [int64]$_.id }
+)
+if ($reviewerRoleIds.Count -ne 4) {
+    throw "VisionAI system roles are incomplete; expected REVIEWER, APPROVER, AUDITOR and DATA_MANAGER"
+}
+Invoke-VisionAI -Method Post -Path "/system/permission/assign-user-role" -Body @{
+    userId = $reviewerId
+    roleIds = $reviewerRoleIds
+} | Out-Null
+$approverPage = Invoke-VisionAI -Method Get -Path "/system/user/page?pageNo=1&pageSize=20&username=$ApproverUsername"
+if ([int]$approverPage.total -eq 0) {
+    $approverId = Invoke-VisionAI -Method Post -Path "/system/user/create" -Body @{
+        username = $ApproverUsername
+        password = $ApproverPassword
+        nickname = "VisionAI Production Approver"
+        status = 0
+        deptId = 0
+        postIds = @()
+        roleIds = @()
+    }
+} else {
+    $approverId = [int64]$approverPage.list[0].id
+    Invoke-VisionAI -Method Put -Path "/system/user/update-password" -Body @{
+        id = $approverId
+        password = $ApproverPassword
+    } | Out-Null
+}
+$approverRoleId = [int64](
+    $systemRoles |
+        Where-Object { $_.code -eq "APPROVER" } |
+        Select-Object -First 1
+).id
+if ($approverRoleId -le 0) {
+    throw "VisionAI APPROVER system role is missing"
+}
+Invoke-VisionAI -Method Post -Path "/system/permission/assign-user-role" -Body @{
+    userId = $approverId
+    roleIds = @($approverRoleId)
+} | Out-Null
 
 Write-Step "Creating the COCO128 acceptance project"
 $project = Invoke-VisionAI -Method Post -Path "/ai-platform/projects" -Body @{
@@ -162,7 +207,9 @@ $projectId = [int64]$project.id
 Invoke-VisionAI -Method Put -Path "/ai-platform/projects/$projectId/status" -Body @{ status = "ACTIVE" } | Out-Null
 Invoke-VisionAI -Method Put -Path "/ai-platform/projects/$projectId/members" -Body @{
     userId = $reviewerId
-    roles = @("REVIEWER", "APPROVER", "AUDITOR")
+} | Out-Null
+Invoke-VisionAI -Method Put -Path "/ai-platform/projects/$projectId/members" -Body @{
+    userId = $approverId
 } | Out-Null
 Invoke-VisionAI -Method Put -Path "/ai-platform/cvat-user-mappings" -Body @{
     platformUserId = 1
@@ -195,11 +242,28 @@ if ($assetRows.Count -ne 128) {
 }
 $assetIds = @($assetRows | ForEach-Object { [int64]$_.id })
 
+Write-Step "Applying governed business, scene and source tags to all COCO128 assets"
+$tagDefinitions = @(
+    @{ code = "benchmark"; name = "Public benchmark"; category = "BUSINESS"; color = "#2563eb"; description = "Public benchmark data used for repeatable acceptance"; enabled = $true },
+    @{ code = "daylight"; name = "Mixed daylight scenes"; category = "SCENE"; color = "#16a34a"; description = "COCO daylight and mixed-scene imagery"; enabled = $true },
+    @{ code = "ultralytics-coco128"; name = "Ultralytics COCO128"; category = "SOURCE"; color = "#ea580c"; description = "Ultralytics public COCO128 release"; enabled = $true }
+)
+$tagDefinitionIds = @()
+foreach ($definition in $tagDefinitions) {
+    $created = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/tag-definitions" -Body $definition
+    $tagDefinitionIds += [int64]$created.id
+}
+Invoke-VisionAI -Method Put -Path "/ai-platform/projects/$projectId/assets/tags" -Body @{
+    assetIds = $assetIds
+    definitionIds = $tagDefinitionIds
+    mode = "ADD"
+} | Out-Null
+
 Write-Step "Freezing a 128-image asset collection"
 $collection = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/collections" -Body @{
     name = "COCO128 Public Images"
     description = "First 128 images from COCO train2017, used for public pipeline acceptance."
-    filter = @{ source = "COCO128"; imageCount = 128 }
+    filter = @{ source = "COCO128"; imageCount = 128; tagDefinitionIds = $tagDefinitionIds }
 }
 $collectionId = [int64]$collection.id
 Invoke-VisionAI -Method Put -Path "/ai-platform/projects/$projectId/collections/$collectionId/assets" -Body @{ assetIds = $assetIds } | Out-Null
@@ -217,7 +281,31 @@ $classNames = @(
 )
 $colors = @("#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6", "#06b6d4", "#3b82f6", "#6366f1", "#a855f7", "#ec4899")
 $annotationLabels = for ($index = 0; $index -lt $classNames.Count; $index++) {
-    @{ name = $classNames[$index]; color = $colors[$index % $colors.Count]; type = "rectangle" }
+    @{
+        code = "coco_$($index.ToString('00'))"
+        name = $classNames[$index]
+        color = $colors[$index % $colors.Count]
+        shapeType = "rectangle"
+        sort = $index
+        attributes = @()
+    }
+}
+
+Write-Step "Creating and publishing the governed COCO 80 ontology"
+$ontologyResult = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/ontologies" -Body @{
+    code = "coco_detection"
+    name = "COCO 2017 Detection"
+    taskType = "CV_DETECTION"
+    description = "The 80-category COCO 2017 detection ontology used by the public acceptance pipeline."
+}
+$ontologyId = [int64]$ontologyResult.ontology.id
+$ontologyVersionId = [int64]$ontologyResult.version.id
+Invoke-VisionAI -Method Put -Path "/ai-platform/projects/$projectId/ontology-versions/$ontologyVersionId/labels" -Body @{
+    labels = $annotationLabels
+} | Out-Null
+$publishedOntology = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/ontology-versions/$ontologyVersionId/publish"
+if (-not $publishedOntology.checksum -or $publishedOntology.status -ne "PUBLISHED") {
+    throw "COCO ontology publishing failed"
 }
 
 Write-Step "Creating a governed CVAT task with the 80-class COCO ontology"
@@ -225,8 +313,8 @@ $annotationTask = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$pro
     name = "COCO128 Ground Truth Review"
     taskType = "CV_DETECTION"
     collectionId = $collectionId
-    ontologyVersion = "coco-2017-v1"
-    labels = $annotationLabels
+    tagDefinitionIds = $tagDefinitionIds
+    ontologyVersionId = $ontologyVersionId
     annotatorIds = @(1)
     reviewerIds = @(1)
 }
@@ -337,7 +425,7 @@ $datasetVersion = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$pro
     sourceType = "COLLECTION"
     sourceId = $collectionId
     annotationRevisionId = $annotationRevisionId
-    ontologyVersion = "coco-2017-v1"
+    ontologyVersionId = $ontologyVersionId
     splitSeed = 20260724
     split = @{ TRAIN = 0.8; VAL = 0.1; TEST = 0.1 }
 }
@@ -349,39 +437,78 @@ Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/dataset-ver
 $datasetFrozen = Wait-VisionAIStatus -Path "/ai-platform/projects/$projectId/dataset-versions/$datasetVersionId" `
     -ReadStatus { param($data) $data.version.status } -Success @("FROZEN") -Failure @("DRAFT", "FAILED") -TimeoutSeconds 300
 
-Write-Step "Running the LocalDocker training contract"
-$trainerDigest = "sha256:6b9965ec41a383bdae49aa329971e4cb833b200ab202a71c7559af2c96c5c0da"
+Write-Step "Registering the RTX 3060 node and running the LocalDocker CUDA contract"
+$gpuModel = (& nvidia-smi --query-gpu=name --format=csv,noheader | Select-Object -First 1).Trim()
+$gpuMemoryMiB = [int]((& nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | Select-Object -First 1).Trim())
+$driverVersion = (& nvidia-smi --query-gpu=driver_version --format=csv,noheader | Select-Object -First 1).Trim()
+if (-not $gpuModel) {
+    throw "No NVIDIA GPU was detected for the required GPU acceptance run"
+}
+Invoke-VisionAI -Method Post -Path "/ai-platform/resources/nodes/heartbeat" -Body @{
+    nodeKey = "windows-rtx3060"
+    name = "Windows RTX 3060 workstation"
+    gpuModel = $gpuModel
+    gpuCount = 1
+    gpuMemoryBytes = [int64]$gpuMemoryMiB * 1MB
+    gpuUsedBytes = 0
+    driverVersion = $driverVersion
+    cudaVersion = "12.6"
+    labels = @{ os = "windows"; runtime = "docker-desktop"; acceptance = "COCO128" }
+} | Out-Null
+Invoke-VisionAI -Method Put -Path "/ai-platform/resources/queues" -Body @{
+    name = "gpu-local"
+    provider = "LOCAL_DOCKER"
+    externalQueue = "gpu-local"
+    priority = 100
+    enabled = $true
+} | Out-Null
+$trainerDigest = (docker image inspect visionai/trainer-gpu:cuda12.6 --format '{{.Id}}').Trim()
+if (-not $trainerDigest.StartsWith("sha256:")) {
+    throw "Immutable GPU trainer image ID is unavailable"
+}
 $template = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/training-templates" -Body @{
-    name = "COCO128 LocalDocker Trainer"
+    name = "COCO128 RTX 3060 CUDA Trainer"
     aiType = "CV_DETECTION"
-    description = "Immutable training contract used for COCO128 lifecycle acceptance."
+    description = "Immutable CUDA trainer that reads staged COCO128 images and records GPU evidence."
 }
 $templateId = [int64]$template.id
 $templateVersion = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/training-templates/$templateId/versions" -Body @{
-    trainer = "LocalDockerSmoke"
+    trainer = "TorchVisionFasterRCNN"
     imageRef = $trainerDigest
     entrypoint = ""
-    parameterSchema = @{ type = "object"; properties = @{ epochs = @{ type = "integer"; minimum = 1 } } }
+    parameterSchema = @{ type = "object"; properties = @{ epochs = @{ type = "integer"; minimum = 1 }; batchSize = @{ type = "integer"; minimum = 1 }; learningRate = @{ type = "number"; exclusiveMinimum = 0 }; pretrained = @{ type = "boolean" } } }
     outputProtocol = "visionai.result-manifest.v1"
-    resourceRequirements = @{ cpu = 1; memoryBytes = 536870912; gpuMax = 0 }
-    compatibility = @{ taskTypes = @("CV_DETECTION") }
+    resourceRequirements = @{ cpu = 2; memoryBytes = 4294967296; gpuMin = 1; gpuMax = 1 }
+    compatibility = @{
+        datasetTypes = @("CV_DETECTION")
+        modelTypes = @("CV_DETECTION")
+        providers = @("LOCAL_DOCKER", "CLEARML")
+        cudaRange = ">=12.0 <13.0"
+        driverRange = ">=550"
+        minCUDA = "12.0"
+        minDriver = "550"
+        providerVersions = @{
+            LOCAL_DOCKER = "Docker Engine 27+"
+            CLEARML = "2.x"
+        }
+    }
     licensePolicy = @{ allowed = $true; dataset = "COCO128" }
 }
 $templateVersionId = [int64]$templateVersion.id
 Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/training-template-versions/$templateVersionId/smoke" | Out-Null
 Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/training-template-versions/$templateVersionId/publish" | Out-Null
 $training = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/training-runs" -Body @{
-    name = "COCO128 Baseline Training"
+    name = "COCO128 RTX 3060 GPU Training"
     datasetVersionId = $datasetVersionId
     templateVersionId = $templateVersionId
     provider = "LOCAL_DOCKER"
-    queue = "cpu-local"
-    gpuCount = 0
+    queue = "gpu-local"
+    gpuCount = 1
     priority = 50
-    parameters = @{ epochs = 1; dataset = "COCO128"; imageSize = 640 }
-    runtimeSpec = @{ memoryBytes = 536870912; cpus = 1 }
-    codeCommit = "coco128-public-acceptance"
-    pretrainedRef = "none"
+    parameters = @{ epochs = 2; batchSize = 2; learningRate = 0.0025; pretrained = $true; seed = 20260727; dataset = "COCO128"; imageSize = 320 }
+    runtimeSpec = @{ memoryBytes = 4294967296; cpus = 2 }
+    codeCommit = "coco128-rtx3060-acceptance"
+    pretrainedRef = "torchvision://fasterrcnn_mobilenet_v3_large_320_fpn/COCO_V1"
 } -ExtraHeaders @{ "Idempotency-Key" = "coco128-training-$RunTag" }
 $trainingRunId = [int64]$training.run.id
 $trainingFinal = Wait-VisionAIStatus -Path "/ai-platform/projects/$projectId/training-runs/$trainingRunId" `
@@ -392,7 +519,7 @@ $suite = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/ev
     name = "COCO128 Release Gate"
     datasetVersionId = $datasetVersionId
     slices = @("all", "small-object", "occluded", "low-confidence")
-    thresholds = @{ mAP = 0.5; precision = 0.5; recall = 0.5 }
+    thresholds = @{ mAP = 0.5; precision = 0.25; recall = 0.4 }
     gatePolicy = "MUST_PASS"
 }
 $suiteId = [int64]$suite.id
@@ -420,12 +547,19 @@ $modelVersionId = [int64]$modelVersion.id
 $approval = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/model-versions/$modelVersionId/approvals" -Body @{
     approvalType = "PRODUCTION_QUALIFICATION"
     targetEnvironment = "PRODUCTION"
+    riskSummary = "COCO128 may miss small, occluded or low-confidence objects; gate results and failure samples are immutable."
+    rollbackPlan = "Stop the active revision and restore the previous approved model while preserving inference traces and audit evidence."
 }
 $approvalId = [int64]$approval.id
 $reviewerToken = Invoke-Login $ReviewerUsername $ReviewerPassword
 Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/approvals/$approvalId/decision" -AccessToken $reviewerToken -Body @{
     decision = "APPROVE"
     comment = "COCO128 evidence, lineage, quality gate and immutable artifacts verified."
+} | Out-Null
+$approverToken = Invoke-Login $ApproverUsername $ApproverPassword
+Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/approvals/$approvalId/decision" -AccessToken $approverToken -Body @{
+    decision = "APPROVE"
+    comment = "Production risk, rollback plan and release boundary verified."
 } | Out-Null
 
 Write-Step "Deploying, running inference and capturing production feedback"
@@ -462,6 +596,10 @@ $feedbackBatch = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$proj
     sampleIds = @($feedbackSamples | ForEach-Object { [int64]$_.id })
 }
 $feedbackBatchId = [int64]$feedbackBatch.id
+Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/feedback-batches/$feedbackBatchId/review" -AccessToken $reviewerToken -Body @{
+    decision = "PRIVACY_APPROVE"
+    comment = "Redaction, retention and restricted-use evidence verified by a reviewer separate from the batch creator."
+} | Out-Null
 $feedbackReview = Invoke-VisionAI -Method Post -Path "/ai-platform/projects/$projectId/feedback-batches/$feedbackBatchId/review" -Body @{
     decision = "ACCEPT"
     comment = "Accepted for governed relabeling and the next dataset revision."

@@ -21,17 +21,32 @@ func TestCVATProviderContract(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/server/about":
 			_, _ = io.WriteString(w, `{"version":"2.71.0"}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/projects":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if payload["name"] != "VisionAI project" {
+				t.Fatalf("unexpected project body: %#v", payload)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = io.WriteString(w, `{"id":21,"name":"VisionAI project"}`)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/tasks":
 			var payload map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&payload)
-			if payload["name"] != "quality task" {
+			if payload["name"] != "quality task" && payload["name"] != "project task" {
 				t.Fatalf("unexpected task body: %#v", payload)
+			}
+			if payload["name"] == "project task" && payload["project_id"] != float64(21) {
+				t.Fatalf("project-scoped task is missing project id: %#v", payload)
 			}
 			if payload["segment_size"] != float64(25) {
 				t.Fatalf("unexpected segment size: %#v", payload)
 			}
 			w.WriteHeader(http.StatusCreated)
-			_, _ = io.WriteString(w, `{"id":42,"name":"quality task","status":"annotation","size":0}`)
+			if payload["name"] == "project task" {
+				_, _ = io.WriteString(w, `{"id":43,"name":"project task","status":"annotation","size":0}`)
+			} else {
+				_, _ = io.WriteString(w, `{"id":42,"name":"quality task","status":"annotation","size":0}`)
+			}
 		case r.Method == http.MethodPost && r.URL.Path == "/api/tasks/42/data":
 			if err := r.ParseMultipartForm(1 << 20); err != nil {
 				t.Fatal(err)
@@ -46,6 +61,11 @@ func TestCVATProviderContract(t *testing.T) {
 			w.WriteHeader(http.StatusAccepted)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/tasks/42":
 			_, _ = io.WriteString(w, `{"id":42,"name":"quality task","status":"annotation","size":1,"progress":80}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/labels":
+			if r.URL.Query().Get("task_id") != "42" {
+				t.Fatalf("missing CVAT task label scope: %s", r.URL.RawQuery)
+			}
+			_, _ = io.WriteString(w, `{"results":[{"id":9,"name":"defect","type":"rectangle","color":"#ff4d4f"}]}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/tasks/42/annotations":
 			_, _ = io.WriteString(w, `{"shapes":[{"id":1}],"tags":[],"tracks":[]}`)
 		case r.Method == http.MethodPut && r.URL.Path == "/api/tasks/42/annotations":
@@ -70,12 +90,24 @@ func TestCVATProviderContract(t *testing.T) {
 	if err != nil || task.ID != 42 {
 		t.Fatalf("create: %#v %v", task, err)
 	}
+	project, err := provider.CreateProject(ctx, "VisionAI project", []Label{{Name: "defect"}})
+	if err != nil || project.ID != 21 {
+		t.Fatalf("create project: %#v %v", project, err)
+	}
+	projectTask, err := provider.CreateTaskInProject(ctx, "project task", project.ID, 25)
+	if err != nil || projectTask.ID != 43 {
+		t.Fatalf("create project task: %#v %v", projectTask, err)
+	}
 	if err = provider.AttachData(ctx, task.ID, []Media{{Name: "sample.png", Reader: strings.NewReader("image-bytes")}}); err != nil || !attached {
 		t.Fatalf("attach data: %v attached=%v", err, attached)
 	}
 	task, err = provider.GetTask(ctx, task.ID)
 	if err != nil || task.Size != 1 || task.Progress != 80 {
 		t.Fatalf("retrieve: %#v %v", task, err)
+	}
+	labels, err := provider.GetTaskLabels(ctx, task.ID)
+	if err != nil || len(labels) != 1 || labels[0].ID != 9 {
+		t.Fatalf("labels: %#v %v", labels, err)
 	}
 	raw, err := provider.GetAnnotations(ctx, task.ID)
 	count := strings.Count(string(raw), `"id"`)
@@ -87,6 +119,9 @@ func TestCVATProviderContract(t *testing.T) {
 	}
 	if got := provider.TaskURL(task.ID); got != "https://cvat.example.test/tasks/42" {
 		t.Fatalf("task URL = %s", got)
+	}
+	if got := provider.ProjectURL(project.ID); got != "https://cvat.example.test/projects/21" {
+		t.Fatalf("project URL = %s", got)
 	}
 }
 

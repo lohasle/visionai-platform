@@ -14,27 +14,29 @@ import (
 	"gorm.io/gorm"
 )
 
-var projectRoles = map[string]bool{
-	"PROJECT_OWNER": true, "DATA_MANAGER": true, "ANNOTATOR": true,
-	"REVIEWER": true, "ALGORITHM_ENGINEER": true, "APPROVER": true,
-	"OPS": true, "AUDITOR": true,
-}
-
 type projectRequest struct {
-	Code        string `json:"code"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Code              string  `json:"code"`
+	Name              string  `json:"name"`
+	Description       string  `json:"description"`
+	AIDomain          string  `json:"aiDomain"`
+	TaskType          string  `json:"taskType"`
+	OwnerUserID       uint64  `json:"ownerUserId"`
+	DefaultProvider   string  `json:"defaultProvider"`
+	StorageBucket     string  `json:"storageBucket"`
+	MaxConcurrentJobs int     `json:"maxConcurrentJobs"`
+	MonthlyGPUHours   float64 `json:"monthlyGpuHours"`
+	StorageBytes      int64   `json:"storageBytes"`
 }
 
 type memberRequest struct {
-	UserID uint64   `json:"userId"`
-	Roles  []string `json:"roles"`
+	UserID uint64 `json:"userId"`
 }
 
 type configRequest struct {
 	StorageConfig  map[string]any    `json:"storageConfig"`
 	ProviderConfig map[string]any    `json:"providerConfig"`
 	SecretRefs     map[string]string `json:"secretRefs"`
+	ChangeReason   string            `json:"changeReason"`
 }
 
 type projectStatusRequest struct {
@@ -80,17 +82,52 @@ func (h *Handler) requireProjectRole(c *gin.Context, project Project, allowed ..
 		httpx.Fail(c, http.StatusForbidden, 403, "无权执行该项目操作")
 		return false
 	}
-	var roles []string
-	_ = json.Unmarshal([]byte(member.Roles), &roles)
-	for _, role := range roles {
-		for _, candidate := range allowed {
-			if role == candidate {
-				return true
-			}
-		}
+	if h.userHasSystemRole(project.TenantID, member.UserID, allowed...) {
+		return true
 	}
 	httpx.Fail(c, http.StatusForbidden, 403, "当前项目角色无权执行该操作")
 	return false
+}
+
+func normalizedRoleCodes(codes []string) []string {
+	result := make([]string, 0, len(codes))
+	seen := make(map[string]struct{}, len(codes))
+	for _, code := range codes {
+		code = strings.ToUpper(strings.TrimSpace(code))
+		if code == "" {
+			continue
+		}
+		if _, exists := seen[code]; exists {
+			continue
+		}
+		seen[code] = struct{}{}
+		result = append(result, code)
+	}
+	return result
+}
+
+func (h *Handler) userHasSystemRole(tenantID, userID uint64, allowed ...string) bool {
+	codes := normalizedRoleCodes(allowed)
+	if len(codes) == 0 {
+		return false
+	}
+	var count int64
+	h.db.Table("roles AS r").
+		Joins("JOIN user_roles AS ur ON ur.role_id = r.id").
+		Where("r.tenant_id = ? AND ur.user_id = ? AND r.status = ? AND UPPER(r.code) IN ?", tenantID, userID, 0, codes).
+		Count(&count)
+	return count > 0
+}
+
+func (h *Handler) systemRolesForUser(tenantID, userID uint64) []system.Role {
+	roles := make([]system.Role, 0)
+	h.db.Table("roles AS r").
+		Select("r.*").
+		Joins("JOIN user_roles AS ur ON ur.role_id = r.id").
+		Where("r.tenant_id = ? AND ur.user_id = ?", tenantID, userID).
+		Order("r.sort,r.id").
+		Find(&roles)
+	return roles
 }
 
 // ProjectPage godoc
@@ -129,20 +166,70 @@ func (h *Handler) ProjectCreate(c *gin.Context) {
 		httpx.Fail(c, http.StatusBadRequest, 400, "项目编码和名称必填")
 		return
 	}
+	if req.OwnerUserID == 0 {
+		req.OwnerUserID = c.GetUint64("user_id")
+	}
+	if h.db.Where("tenant_id = ? AND id = ? AND status = ?", tenantID(c), req.OwnerUserID, 0).
+		First(&system.AdminUser{}).Error != nil {
+		httpx.Fail(c, http.StatusBadRequest, 400, "项目负责人不属于当前租户或已停用")
+		return
+	}
+	req.AIDomain = strings.ToUpper(strings.TrimSpace(req.AIDomain))
+	if req.AIDomain == "" {
+		req.AIDomain = "CV"
+	}
+	req.TaskType = strings.ToUpper(strings.TrimSpace(req.TaskType))
+	if req.TaskType == "" {
+		req.TaskType = "CV_DETECTION"
+	}
+	req.DefaultProvider = strings.ToUpper(strings.TrimSpace(req.DefaultProvider))
+	if req.DefaultProvider == "" {
+		req.DefaultProvider = "LOCAL_DOCKER"
+	}
+	req.StorageBucket = strings.TrimSpace(req.StorageBucket)
+	if req.StorageBucket == "" {
+		req.StorageBucket = "visionai-assets"
+	}
+	if req.MaxConcurrentJobs < 1 {
+		req.MaxConcurrentJobs = 2
+	}
+	if req.MonthlyGPUHours <= 0 {
+		req.MonthlyGPUHours = 100
+	}
+	if req.StorageBytes < 1 {
+		req.StorageBytes = 100 * 1024 * 1024 * 1024
+	}
 	project := Project{
 		TenantID: tenantID(c), Code: strings.TrimSpace(req.Code), Name: strings.TrimSpace(req.Name),
 		Description: strings.TrimSpace(req.Description), Status: ProjectDraft,
-		OwnerUserID: c.GetUint64("user_id"), CreatedBy: c.GetUint64("user_id"),
+		AIDomain: req.AIDomain, TaskType: req.TaskType, DefaultProvider: req.DefaultProvider,
+		StorageBucket: req.StorageBucket, OwnerUserID: req.OwnerUserID, CreatedBy: c.GetUint64("user_id"),
 	}
 	err := h.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&project).Error; err != nil {
 			return err
 		}
-		roles, _ := json.Marshal([]string{"PROJECT_OWNER"})
-		if err := tx.Create(&ProjectMember{TenantID: project.TenantID, ProjectID: project.ID, UserID: project.OwnerUserID, Roles: string(roles), CreatedBy: project.CreatedBy}).Error; err != nil {
+		if err := tx.Create(&ProjectMember{TenantID: project.TenantID, ProjectID: project.ID, UserID: project.OwnerUserID, LegacyRoles: "[]", CreatedBy: project.CreatedBy}).Error; err != nil {
 			return err
 		}
-		if err := tx.Create(&ProjectConfig{TenantID: project.TenantID, ProjectID: project.ID, StorageConfig: "{}", ProviderConfig: "{}", SecretRefs: "{}"}).Error; err != nil {
+		if project.OwnerUserID != project.CreatedBy {
+			if err := tx.Create(&ProjectMember{TenantID: project.TenantID, ProjectID: project.ID, UserID: project.CreatedBy, LegacyRoles: "[]", CreatedBy: project.CreatedBy}).Error; err != nil {
+				return err
+			}
+		}
+		storageConfig, _ := json.Marshal(gin.H{"bucket": project.StorageBucket, "recycleRetentionDays": 30})
+		providerConfig, _ := json.Marshal(gin.H{"trainingProvider": project.DefaultProvider})
+		if err := tx.Create(&ProjectConfig{
+			TenantID: project.TenantID, ProjectID: project.ID,
+			StorageConfig: string(storageConfig), ProviderConfig: string(providerConfig), SecretRefs: "{}",
+		}).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&ProjectQuota{
+			TenantID: project.TenantID, ProjectID: project.ID,
+			MaxConcurrentJobs: req.MaxConcurrentJobs, MonthlyGPUHours: req.MonthlyGPUHours,
+			StorageBytes: req.StorageBytes, UpdatedBy: project.CreatedBy,
+		}).Error; err != nil {
 			return err
 		}
 		if err := appendAudit(tx, c, project.ID, "PROJECT_CREATED", "PROJECT", project.ID, nil, project); err != nil {
@@ -211,6 +298,67 @@ func (h *Handler) ProjectGet(c *gin.Context) {
 	}
 }
 
+// ProjectOverview godoc
+// @Summary Get project lifecycle counts, risks and business timeline
+// @Tags VisionAI Project
+// @Security BearerAuth
+// @Success 200 {object} httpx.Response
+// @Router /ai-platform/projects/{id}/overview [get]
+func (h *Handler) ProjectOverview(c *gin.Context) {
+	project, ok := h.projectAccess(c, false)
+	if !ok {
+		return
+	}
+	count := func(model any, query string, args ...any) int64 {
+		var value int64
+		h.db.Model(model).Where("tenant_id = ? AND project_id = ?", project.TenantID, project.ID).
+			Where(query, args...).Count(&value)
+		return value
+	}
+	metrics := gin.H{
+		"assets":          count(&Asset{}, "status <> ?", AssetPurged),
+		"annotations":     count(&AnnotationTask{}, "1 = 1"),
+		"datasetVersions": count(&DatasetVersion{}, "1 = 1"),
+		"trainingRuns":    count(&TrainingRun{}, "1 = 1"),
+		"modelVersions":   count(&ModelVersion{}, "1 = 1"),
+		"deployments":     count(&Deployment{}, "1 = 1"),
+	}
+	risks := make([]gin.H, 0)
+	failedJobs := count(&PlatformJob{}, "status = ?", JobFailed)
+	if failedJobs > 0 {
+		risks = append(risks, gin.H{
+			"code": "FAILED_JOBS", "severity": "HIGH", "count": failedJobs,
+			"message": "存在失败任务需要诊断或重试", "route": "/ai-platform/dashboard",
+		})
+	}
+	openAlerts := count(&AlertEvent{}, "status IN ?", []string{"OPEN", "ACKNOWLEDGED"})
+	if openAlerts > 0 {
+		risks = append(risks, gin.H{
+			"code": "OPEN_ALERTS", "severity": "HIGH", "count": openAlerts,
+			"message": "存在未处置的生产告警", "route": "/ai-platform/deployments",
+		})
+	}
+	pendingApprovals := count(&ApprovalRequest{}, "status IN ?", []string{"PENDING", "IN_REVIEW"})
+	if pendingApprovals > 0 {
+		risks = append(risks, gin.H{
+			"code": "PENDING_APPROVALS", "severity": "MEDIUM", "count": pendingApprovals,
+			"message": "存在待处理的模型审批", "route": "/ai-platform/models",
+		})
+	}
+	var timeline []AuditEvent
+	h.db.Where("tenant_id = ? AND project_id = ?", project.TenantID, project.ID).
+		Where("action NOT IN ?", []string{"WORKBENCH_OPENED", "DASHBOARD_VIEWED"}).
+		Order("id DESC").Limit(30).Find(&timeline)
+	var quota ProjectQuota
+	h.db.Where("tenant_id = ? AND project_id = ?", project.TenantID, project.ID).First(&quota)
+	var projectConfig ProjectConfig
+	h.db.Where("tenant_id = ? AND project_id = ?", project.TenantID, project.ID).First(&projectConfig)
+	httpx.OK(c, gin.H{
+		"project": project, "metrics": metrics, "risks": risks, "timeline": timeline,
+		"quota": quota, "config": configView(projectConfig),
+	})
+}
+
 // ProjectUpdate godoc
 // @Summary Update project
 // @Tags VisionAI Project
@@ -264,6 +412,19 @@ func (h *Handler) ProjectArchive(c *gin.Context) {
 		httpx.Fail(c, http.StatusConflict, 409, "项目存在运行中任务，无法归档")
 		return
 	}
+	var activeDeployments, unfinishedApprovals int64
+	h.db.Model(&Deployment{}).Where(
+		"tenant_id = ? AND project_id = ? AND status IN ?",
+		project.TenantID, project.ID, []string{"DEPLOYING", "RUNNING"},
+	).Count(&activeDeployments)
+	h.db.Model(&ApprovalRequest{}).Where(
+		"tenant_id = ? AND project_id = ? AND status IN ?",
+		project.TenantID, project.ID, []string{"PENDING", "IN_REVIEW"},
+	).Count(&unfinishedApprovals)
+	if activeDeployments > 0 || unfinishedApprovals > 0 {
+		httpx.Fail(c, http.StatusConflict, 409, "项目存在运行中部署或未完成审批，无法归档")
+		return
+	}
 	now := time.Now()
 	beforeStatus := project.Status
 	project.Status, project.ArchivedAt = ProjectArchived, &now
@@ -300,16 +461,36 @@ func (h *Handler) ProjectClone(c *gin.Context) {
 	}
 	var sourceConfig ProjectConfig
 	h.db.Where("tenant_id = ? AND project_id = ?", source.TenantID, source.ID).First(&sourceConfig)
-	clone := Project{TenantID: source.TenantID, Code: strings.TrimSpace(req.Code), Name: strings.TrimSpace(req.Name), Description: req.Description, Status: ProjectActive, OwnerUserID: c.GetUint64("user_id"), CreatedBy: c.GetUint64("user_id")}
+	clone := Project{
+		TenantID: source.TenantID, Code: strings.TrimSpace(req.Code), Name: strings.TrimSpace(req.Name),
+		Description: req.Description, AIDomain: source.AIDomain, TaskType: source.TaskType,
+		DefaultProvider: source.DefaultProvider, StorageBucket: source.StorageBucket,
+		Status: ProjectActive, OwnerUserID: c.GetUint64("user_id"), CreatedBy: c.GetUint64("user_id"),
+	}
 	err := h.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&clone).Error; err != nil {
 			return err
 		}
-		roles, _ := json.Marshal([]string{"PROJECT_OWNER"})
-		if err := tx.Create(&ProjectMember{TenantID: clone.TenantID, ProjectID: clone.ID, UserID: clone.OwnerUserID, Roles: string(roles), CreatedBy: clone.CreatedBy}).Error; err != nil {
+		if err := tx.Create(&ProjectMember{TenantID: clone.TenantID, ProjectID: clone.ID, UserID: clone.OwnerUserID, LegacyRoles: "[]", CreatedBy: clone.CreatedBy}).Error; err != nil {
 			return err
 		}
 		if err := tx.Create(&ProjectConfig{TenantID: clone.TenantID, ProjectID: clone.ID, StorageConfig: sourceConfig.StorageConfig, ProviderConfig: sourceConfig.ProviderConfig, SecretRefs: "{}"}).Error; err != nil {
+			return err
+		}
+		var sourceQuota ProjectQuota
+		if tx.Where("tenant_id = ? AND project_id = ?", source.TenantID, source.ID).First(&sourceQuota).Error == nil {
+			if err := tx.Create(&ProjectQuota{
+				TenantID: clone.TenantID, ProjectID: clone.ID,
+				MaxConcurrentJobs: sourceQuota.MaxConcurrentJobs, MonthlyGPUHours: sourceQuota.MonthlyGPUHours,
+				StorageBytes: sourceQuota.StorageBytes, UpdatedBy: clone.CreatedBy,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		if err := cloneProjectOntologies(tx, source, clone, clone.CreatedBy); err != nil {
+			return err
+		}
+		if err := cloneProjectTrainingTemplates(tx, source, clone, clone.CreatedBy); err != nil {
 			return err
 		}
 		return appendAudit(tx, c, clone.ID, "PROJECT_CLONED", "PROJECT", clone.ID, gin.H{"sourceProjectId": source.ID}, clone)
@@ -319,6 +500,47 @@ func (h *Handler) ProjectClone(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, clone)
+}
+
+func cloneProjectTrainingTemplates(tx *gorm.DB, source, target Project, createdBy uint64) error {
+	var templates []TrainingTemplate
+	if err := tx.Where("tenant_id = ? AND project_id = ?", source.TenantID, source.ID).Order("id").Find(&templates).Error; err != nil {
+		return err
+	}
+	for _, sourceTemplate := range templates {
+		targetTemplate := TrainingTemplate{
+			TenantID: target.TenantID, ProjectID: target.ID, Name: sourceTemplate.Name,
+			AIType: sourceTemplate.AIType, Description: sourceTemplate.Description, CreatedBy: createdBy,
+		}
+		if err := tx.Create(&targetTemplate).Error; err != nil {
+			return err
+		}
+		var versions []TrainingTemplateVersion
+		if err := tx.Where("tenant_id = ? AND project_id = ? AND template_id = ?", source.TenantID, source.ID, sourceTemplate.ID).
+			Order("version_no").Find(&versions).Error; err != nil {
+			return err
+		}
+		for _, sourceVersion := range versions {
+			targetVersion := TrainingTemplateVersion{
+				TenantID: target.TenantID, ProjectID: target.ID, TemplateID: targetTemplate.ID,
+				VersionNo: sourceVersion.VersionNo, SemanticVersion: sourceVersion.SemanticVersion,
+				Trainer: sourceVersion.Trainer, ImageRef: sourceVersion.ImageRef, Entrypoint: sourceVersion.Entrypoint,
+				ParameterSchema: sourceVersion.ParameterSchema, OutputProtocol: sourceVersion.OutputProtocol,
+				ResourceRequirements: sourceVersion.ResourceRequirements, Compatibility: sourceVersion.Compatibility,
+				LicensePolicy: sourceVersion.LicensePolicy, Published: sourceVersion.Published,
+				SmokeStatus: sourceVersion.SmokeStatus, SmokeReport: sourceVersion.SmokeReport,
+				CreatedBy: createdBy,
+			}
+			if sourceVersion.Published {
+				targetVersion.PublishedBy = createdBy
+				targetVersion.PublishedAt = sourceVersion.PublishedAt
+			}
+			if err := tx.Create(&targetVersion).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // ProjectMemberList godoc
@@ -335,29 +557,22 @@ func (h *Handler) ProjectMemberList(c *gin.Context) {
 	h.db.Where("tenant_id = ? AND project_id = ?", tenantID(c), projectID(c)).Order("id").Find(&rows)
 	result := make([]gin.H, 0, len(rows))
 	for _, row := range rows {
-		var roles []string
-		_ = json.Unmarshal([]byte(row.Roles), &roles)
-		result = append(result, gin.H{"id": row.ID, "userId": row.UserID, "roles": roles, "createTime": row.CreatedAt})
+		var user system.AdminUser
+		h.db.Where("tenant_id = ? AND id = ?", row.TenantID, row.UserID).First(&user)
+		roles := h.systemRolesForUser(row.TenantID, row.UserID)
+		result = append(result, gin.H{
+			"id": row.ID, "userId": row.UserID, "username": user.Username, "nickname": user.Nickname,
+			"userStatus": user.Status, "roles": roles, "createTime": row.CreatedAt,
+		})
 	}
 	httpx.OK(c, result)
 }
 
-func validRoles(roles []string) bool {
-	if len(roles) == 0 {
-		return false
-	}
-	for _, role := range roles {
-		if !projectRoles[role] {
-			return false
-		}
-	}
-	return true
-}
-
 // ProjectMemberUpsert godoc
-// @Summary Add or update project member roles
+// @Summary Add a project member whose roles are managed by System Management
 // @Tags VisionAI Project
 // @Security BearerAuth
+// @Param request body memberRequest true "Project member"
 // @Success 200 {object} httpx.Response
 // @Router /ai-platform/projects/{projectId}/members [put]
 func (h *Handler) ProjectMemberUpsert(c *gin.Context) {
@@ -369,26 +584,24 @@ func (h *Handler) ProjectMemberUpsert(c *gin.Context) {
 		return
 	}
 	var req memberRequest
-	if c.ShouldBindJSON(&req) != nil || req.UserID == 0 || !validRoles(req.Roles) {
-		httpx.Fail(c, 400, 400, "用户和有效角色必填")
+	if c.ShouldBindJSON(&req) != nil || req.UserID == 0 {
+		httpx.Fail(c, 400, 400, "项目成员用户必填")
 		return
 	}
-	if h.db.Where("tenant_id = ? AND id = ?", tenantID(c), req.UserID).First(&system.AdminUser{}).Error != nil {
-		httpx.Fail(c, 400, 400, "成员用户不属于当前租户")
+	if h.db.Where("tenant_id = ? AND id = ? AND status = ?", tenantID(c), req.UserID, 0).First(&system.AdminUser{}).Error != nil {
+		httpx.Fail(c, 400, 400, "成员用户不属于当前租户或已停用")
 		return
 	}
-	roles, _ := json.Marshal(req.Roles)
 	row := ProjectMember{TenantID: tenantID(c), ProjectID: projectID(c), UserID: req.UserID}
 	err := h.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("tenant_id = ? AND project_id = ? AND user_id = ?", row.TenantID, row.ProjectID, row.UserID).
-			Attrs(ProjectMember{Roles: string(roles), CreatedBy: c.GetUint64("user_id")}).
+			Attrs(ProjectMember{LegacyRoles: "[]", CreatedBy: c.GetUint64("user_id")}).
 			FirstOrCreate(&row).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&row).Update("roles", string(roles)).Error; err != nil {
-			return err
-		}
-		return appendAudit(tx, c, project.ID, "PROJECT_MEMBER_UPSERTED", "PROJECT_MEMBER", req.UserID, nil, gin.H{"userId": req.UserID, "roles": req.Roles})
+		return appendAudit(tx, c, project.ID, "PROJECT_MEMBER_UPSERTED", "PROJECT_MEMBER", req.UserID, nil, gin.H{
+			"userId": req.UserID, "roleSource": "SYSTEM_MANAGEMENT",
+		})
 	})
 	if err != nil {
 		httpx.Fail(c, 500, 500, "成员保存失败")
@@ -498,6 +711,10 @@ func (h *Handler) ProjectConfigUpdate(c *gin.Context) {
 		httpx.Fail(c, 400, 400, "配置格式错误")
 		return
 	}
+	if strings.TrimSpace(req.ChangeReason) == "" {
+		httpx.Fail(c, 400, 400, "配置变更原因必填")
+		return
+	}
 	if containsInlineSecret(req.StorageConfig) || containsInlineSecret(req.ProviderConfig) {
 		httpx.Fail(c, 400, 400, "敏感凭据不能明文保存，请使用 secretRefs")
 		return
@@ -516,7 +733,9 @@ func (h *Handler) ProjectConfigUpdate(c *gin.Context) {
 		if err := tx.Save(&row).Error; err != nil {
 			return err
 		}
-		return appendAudit(tx, c, project.ID, "PROJECT_CONFIG_UPDATED", "PROJECT_CONFIG", row.ID, beforeConfig, configView(row))
+		return appendAudit(tx, c, project.ID, "PROJECT_CONFIG_UPDATED", "PROJECT_CONFIG", row.ID, beforeConfig, gin.H{
+			"config": configView(row), "changeReason": strings.TrimSpace(req.ChangeReason),
+		})
 	}); err != nil {
 		httpx.Fail(c, 500, 500, "项目配置保存失败")
 		return

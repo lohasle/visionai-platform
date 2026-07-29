@@ -36,7 +36,9 @@ type DatasetVersion struct {
 	SourceType           string               `gorm:"size:32;not null" json:"sourceType"`
 	SourceID             uint64               `gorm:"index;not null" json:"sourceId"`
 	AnnotationRevisionID uint64               `gorm:"index;not null" json:"annotationRevisionId"`
+	OntologyVersionID    uint64               `gorm:"index" json:"ontologyVersionId"`
 	OntologyVersion      string               `gorm:"size:80;not null" json:"ontologyVersion"`
+	OntologyChecksum     string               `gorm:"size:64" json:"ontologyChecksum"`
 	SplitSeed            int64                `gorm:"not null" json:"splitSeed"`
 	SplitConfig          string               `gorm:"type:json;not null" json:"splitConfig"`
 	Status               DatasetVersionStatus `gorm:"size:24;index;not null" json:"status"`

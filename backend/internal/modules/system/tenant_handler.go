@@ -172,6 +172,11 @@ func (h *Handler) TenantCreate(c *gin.Context) {
 		httpx.Fail(c, 500, 500, "初始化角色失败")
 		return
 	}
+	if err = ensureVisionAIRolesForTenant(tx, row.ID); err != nil {
+		tx.Rollback()
+		httpx.Fail(c, 500, 500, "初始化 VisionAI 角色失败")
+		return
+	}
 	user := AdminUser{TenantID: row.ID, Username: req.Username, PasswordHash: string(hash), Nickname: req.ContactName, Mobile: req.ContactMobile, DeptID: dept.ID, Status: 0, LoginDate: time.Now()}
 	if user.Nickname == "" {
 		user.Nickname = "管理员"

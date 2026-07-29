@@ -1,0 +1,56 @@
+{
+  "spec": "SPEC-2240",
+  "linearIssue": "LOH-21",
+  "completedAt": "2026-07-24T22:13:18+08:00",
+  "systemRoleSource": {
+    "roleCount": 8,
+    "roleCodes": [
+      "PROJECT_OWNER",
+      "DATA_MANAGER",
+      "ANNOTATOR",
+      "REVIEWER",
+      "ALGORITHM_ENGINEER",
+      "APPROVER",
+      "OPS",
+      "AUDITOR"
+    ],
+    "projectMemberRoleEditorRemoved": true,
+    "projectMemberRolesResolvedFromSystem": true,
+    "legacyRoleMigrationVerified": true,
+    "accessBeforeRoleRemoval": "ALLOWED",
+    "accessAfterRoleRemoval": 403,
+    "roleAssignmentRestored": true
+  },
+  "browserAcceptance": {
+    "projectId": 14,
+    "memberTab": "项目成员",
+    "systemRoleNamesVisible": true,
+    "addMemberDialogContainsRoleEditor": false,
+    "systemManagementGuidanceVisible": true
+  },
+  "coco128Acceptance": {
+    "runTag": "20260724-221130",
+    "projectId": 16,
+    "images": 128,
+    "cvatShapes": 929,
+    "datasetVersionId": 11,
+    "datasetStatus": "FROZEN",
+    "trainingRunId": 8,
+    "trainingStatus": "SUCCEEDED",
+    "evaluationRunId": 11,
+    "evaluationStatus": "SUCCEEDED",
+    "gateDecision": "PASSED",
+    "modelVersionId": 7,
+    "deploymentId": 7,
+    "deploymentStatus": "RUNNING",
+    "feedbackAnnotationTaskId": 19,
+    "feedbackStatus": "READY"
+  },
+  "checks": [
+    "go test ./...",
+    "pnpm ts:check",
+    "pnpm build:prod",
+    "Swagger generation",
+    "Docker Compose backend/frontend/orchestrator healthy"
+  ]
+}

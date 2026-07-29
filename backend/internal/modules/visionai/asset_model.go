@@ -30,7 +30,16 @@ type Asset struct {
 	Size               int64       `gorm:"index;not null" json:"size"`
 	Width              int         `gorm:"not null;default:0" json:"width"`
 	Height             int         `gorm:"not null;default:0" json:"height"`
+	MediaKind          string      `gorm:"size:16;index;not null;default:IMAGE" json:"mediaKind"`
+	DurationSeconds    float64     `gorm:"not null;default:0" json:"durationSeconds"`
+	Codec              string      `gorm:"size:64" json:"codec"`
+	Language           string      `gorm:"size:32" json:"language"`
+	SourceDevice       string      `gorm:"size:256" json:"sourceDevice"`
+	BusinessScene      string      `gorm:"size:256;index" json:"businessScene"`
+	PerceptualHash     string      `gorm:"size:64;index" json:"perceptualHash"`
+	NearDuplicateOfID  uint64      `gorm:"index;not null;default:0" json:"nearDuplicateOfId"`
 	Status             AssetStatus `gorm:"size:24;index;not null" json:"status"`
+	RecycleFromStatus  AssetStatus `gorm:"size:24" json:"recycleFromStatus"`
 	DuplicateOfID      uint64      `gorm:"index;not null;default:0" json:"duplicateOfId"`
 	ReferenceCount     int         `gorm:"not null;default:0" json:"referenceCount"`
 	Metadata           string      `gorm:"type:json;not null" json:"-"`
@@ -55,6 +64,7 @@ type UploadSession struct {
 	ReceivedChunks  int       `gorm:"not null;default:0" json:"receivedChunks"`
 	Status          string    `gorm:"size:24;index;not null" json:"status"`
 	DuplicatePolicy string    `gorm:"size:24;not null;default:REFERENCE" json:"duplicatePolicy"`
+	Metadata        string    `gorm:"type:json;not null" json:"metadata"`
 	AssetID         uint64    `gorm:"index;not null;default:0" json:"assetId"`
 	ErrorCode       string    `gorm:"size:128" json:"errorCode"`
 	ErrorMessage    string    `gorm:"size:1024" json:"errorMessage"`

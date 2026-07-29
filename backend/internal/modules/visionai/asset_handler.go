@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -14,13 +15,18 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/lohasle/nimbus-framework-go/internal/platform/config"
+	evaluationplatform "github.com/lohasle/nimbus-framework-go/internal/platform/evaluation"
 	"github.com/lohasle/nimbus-framework-go/internal/platform/httpx"
 	"gorm.io/gorm"
 
@@ -37,11 +43,12 @@ const (
 )
 
 type uploadCreateRequest struct {
-	Filename        string `json:"filename"`
-	ContentType     string `json:"contentType"`
-	TotalSize       int64  `json:"totalSize"`
-	ChunkSize       int64  `json:"chunkSize"`
-	DuplicatePolicy string `json:"duplicatePolicy"`
+	Filename        string            `json:"filename"`
+	ContentType     string            `json:"contentType"`
+	TotalSize       int64             `json:"totalSize"`
+	ChunkSize       int64             `json:"chunkSize"`
+	DuplicatePolicy string            `json:"duplicatePolicy"`
+	Metadata        map[string]string `json:"metadata"`
 }
 
 func safeFilename(name string) (string, bool) {
@@ -109,6 +116,7 @@ func (h *Handler) UploadCreate(c *gin.Context) {
 		Filename: filename, DeclaredType: req.ContentType, TotalSize: req.TotalSize,
 		ChunkSize: req.ChunkSize, TotalChunks: totalChunks, Status: UploadCreated,
 		DuplicatePolicy: req.DuplicatePolicy, CreatedBy: c.GetUint64("user_id"),
+		Metadata:  normalizeAssetMetadata(req.Metadata),
 		ExpiresAt: time.Now().Add(48 * time.Hour),
 	}
 	if err := h.db.Create(&session).Error; err != nil {
@@ -117,6 +125,20 @@ func (h *Handler) UploadCreate(c *gin.Context) {
 	}
 	_ = appendAudit(h.db, c, project.ID, "UPLOAD_SESSION_CREATED", "UPLOAD_SESSION", 0, nil, gin.H{"sessionId": session.ID, "filename": session.Filename, "totalSize": session.TotalSize})
 	httpx.OK(c, session)
+}
+
+func normalizeAssetMetadata(values map[string]string) string {
+	result := map[string]string{}
+	for _, key := range []string{"language", "sourceDevice", "businessScene"} {
+		value := strings.TrimSpace(values[key])
+		if len(value) > 256 {
+			value = value[:256]
+		}
+		if value != "" {
+			result[key] = value
+		}
+	}
+	return jsonValue(result)
 }
 
 func (h *Handler) uploadSession(c *gin.Context, project Project) (UploadSession, bool) {
@@ -258,6 +280,212 @@ func inspectImage(ctx context.Context, h *Handler, key string) (hash, contentTyp
 	return hex.EncodeToString(hasher.Sum(nil)), contentType, cfg.Width, cfg.Height, info.Size, nil
 }
 
+type storedAssetInspection struct {
+	Hash            string
+	ContentType     string
+	MediaKind       string
+	Width           int
+	Height          int
+	DurationSeconds float64
+	Codec           string
+	Language        string
+	SourceDevice    string
+	Size            int64
+	Metadata        map[string]any
+}
+
+type ffprobeResult struct {
+	Streams []struct {
+		CodecType string            `json:"codec_type"`
+		CodecName string            `json:"codec_name"`
+		Width     int               `json:"width"`
+		Height    int               `json:"height"`
+		Tags      map[string]string `json:"tags"`
+	} `json:"streams"`
+	Format struct {
+		Duration   string            `json:"duration"`
+		FormatName string            `json:"format_name"`
+		Tags       map[string]string `json:"tags"`
+	} `json:"format"`
+}
+
+func isVideoAsset(filename, declaredType string) bool {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(declaredType)), "video/") {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTextAsset(filename, declaredType string) bool {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(declaredType)), "text/") ||
+		strings.EqualFold(strings.TrimSpace(declaredType), "application/json") ||
+		strings.EqualFold(strings.TrimSpace(declaredType), "application/x-ndjson") {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".txt", ".json", ".jsonl", ".csv", ".tsv", ".xml", ".yaml", ".yml":
+		return true
+	default:
+		return false
+	}
+}
+
+var sensitiveTextPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(password|passwd|secret|access[_-]?key|api[_-]?key|bearer|authorization)\s*[:=]`),
+	regexp.MustCompile(`(?i)(id[_-]?card|identity[_-]?number|phone|mobile|email)\s*[:=]`),
+	regexp.MustCompile(`(身份证|手机号|银行卡|访问密钥|密码)\s*[:：]`),
+	regexp.MustCompile(`\b1[3-9]\d{9}\b`),
+	regexp.MustCompile(`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b`),
+}
+
+func inspectStoredText(ctx context.Context, h *Handler, key, filename, declaredType string) (storedAssetInspection, error) {
+	var result storedAssetInspection
+	object, info, err := h.storage.Get(ctx, key)
+	if err != nil {
+		return result, err
+	}
+	defer object.Close()
+	if info.Size > 32<<20 {
+		return result, errors.New("text asset exceeds the 32 MiB inspection limit")
+	}
+	content, err := io.ReadAll(io.LimitReader(object, (32<<20)+1))
+	if err != nil {
+		return result, fmt.Errorf("read text asset: %w", err)
+	}
+	contentType := strings.TrimSpace(declaredType)
+	if contentType == "" {
+		contentType = mime.TypeByExtension(strings.ToLower(filepath.Ext(filename)))
+	}
+	if contentType == "" {
+		contentType = http.DetectContentType(content)
+	}
+	sum := sha256.Sum256(content)
+	result = storedAssetInspection{
+		Hash: hex.EncodeToString(sum[:]), ContentType: contentType, MediaKind: "TEXT",
+		Codec: "utf-8", Size: info.Size, Metadata: map[string]any{"actualFormat": contentType},
+	}
+	if !utf8.Valid(content) {
+		return result, errors.New("text asset is not valid UTF-8")
+	}
+	text := strings.TrimSpace(string(content))
+	result.Metadata["textCharacters"] = utf8.RuneCountInString(text)
+	if text == "" {
+		return result, errors.New("empty text asset")
+	}
+	for _, pattern := range sensitiveTextPatterns {
+		if pattern.MatchString(text) {
+			result.Metadata["sensitiveFieldDetected"] = true
+			return result, errors.New("sensitive field detected in text asset")
+		}
+	}
+	return result, nil
+}
+
+func inspectStoredVideo(ctx context.Context, h *Handler, key, filename string) (storedAssetInspection, error) {
+	var result storedAssetInspection
+	object, info, err := h.storage.Get(ctx, key)
+	if err != nil {
+		return result, err
+	}
+	hasher := sha256.New()
+	if _, err = io.Copy(hasher, object); err != nil {
+		_ = object.Close()
+		return result, fmt.Errorf("hash video: %w", err)
+	}
+	_ = object.Close()
+	probeInput, _, err := h.storage.Get(ctx, key)
+	if err != nil {
+		return result, err
+	}
+	defer probeInput.Close()
+	command := exec.CommandContext(
+		ctx, "ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", "pipe:0",
+	)
+	command.Stdin = probeInput
+	output, err := command.Output()
+	if err != nil {
+		return result, fmt.Errorf("ffprobe video: %w", err)
+	}
+	var probe ffprobeResult
+	if json.Unmarshal(output, &probe) != nil {
+		return result, errors.New("decode ffprobe output")
+	}
+	var video *struct {
+		CodecType string            `json:"codec_type"`
+		CodecName string            `json:"codec_name"`
+		Width     int               `json:"width"`
+		Height    int               `json:"height"`
+		Tags      map[string]string `json:"tags"`
+	}
+	for i := range probe.Streams {
+		if probe.Streams[i].CodecType == "video" {
+			video = &probe.Streams[i]
+			break
+		}
+	}
+	if video == nil || video.Width <= 0 || video.Height <= 0 {
+		return result, errors.New("video stream is missing")
+	}
+	duration, durationErr := strconv.ParseFloat(strings.TrimSpace(probe.Format.Duration), 64)
+	if durationErr != nil || duration <= 0 {
+		return result, errors.New("video duration is invalid")
+	}
+	language := strings.TrimSpace(video.Tags["language"])
+	if language == "" {
+		language = strings.TrimSpace(probe.Format.Tags["language"])
+	}
+	device := strings.TrimSpace(probe.Format.Tags["com.apple.quicktime.make"] + " " + probe.Format.Tags["com.apple.quicktime.model"])
+	contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(filename)))
+	if contentType == "" {
+		contentType = "video/" + strings.Split(probe.Format.FormatName, ",")[0]
+	}
+	result = storedAssetInspection{
+		Hash: hex.EncodeToString(hasher.Sum(nil)), ContentType: contentType, MediaKind: "VIDEO",
+		Width: video.Width, Height: video.Height, DurationSeconds: duration, Codec: video.CodecName,
+		Language: language, SourceDevice: device, Size: info.Size,
+		Metadata: map[string]any{
+			"actualFormat": probe.Format.FormatName, "durationSeconds": duration,
+			"codec": video.CodecName, "language": language, "sourceDevice": device,
+		},
+	}
+	return result, nil
+}
+
+func inspectStoredAsset(ctx context.Context, h *Handler, key, filename, declaredType string) (storedAssetInspection, error) {
+	if isVideoAsset(filename, declaredType) {
+		return inspectStoredVideo(ctx, h, key, filename)
+	}
+	if isTextAsset(filename, declaredType) {
+		return inspectStoredText(ctx, h, key, filename, declaredType)
+	}
+	hash, contentType, width, height, size, err := inspectImage(ctx, h, key)
+	return storedAssetInspection{
+		Hash: hash, ContentType: contentType, MediaKind: "IMAGE", Width: width, Height: height,
+		Size: size, Metadata: map[string]any{"actualFormat": contentType},
+	}, err
+}
+
+func assetInspectionErrorCode(err error) string {
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "empty text"):
+		return "EMPTY_TEXT"
+	case strings.Contains(message, "sensitive field"):
+		return "SENSITIVE_FIELD"
+	case strings.Contains(message, "utf-8"):
+		return "TEXT_DECODE_FAILED"
+	case strings.Contains(message, "unsupported"), strings.Contains(message, "format"):
+		return "FORMAT_MISSING"
+	default:
+		return "MEDIA_DECODE_FAILED"
+	}
+}
+
 func generateThumbnail(ctx context.Context, h *Handler, sourceKey, thumbnailKey string) error {
 	object, _, err := h.storage.Get(ctx, sourceKey)
 	if err != nil {
@@ -331,25 +559,29 @@ func (h *Handler) UploadComplete(c *gin.Context) {
 		httpx.Fail(c, 503, 503, "对象分块合并失败")
 		return
 	}
-	hash, contentType, width, height, size, inspectErr := inspectImage(c.Request.Context(), h, destination)
+	inspection, inspectErr := inspectStoredAsset(c.Request.Context(), h, destination, session.Filename, session.DeclaredType)
 	thumbnailKey := destination + ".thumbnail.jpg"
-	if inspectErr == nil {
+	if inspectErr == nil && inspection.MediaKind == "IMAGE" {
 		inspectErr = generateThumbnail(c.Request.Context(), h, destination, thumbnailKey)
 	}
 	if inspectErr != nil {
+		errorCode := assetInspectionErrorCode(inspectErr)
+		metadata, _ := json.Marshal(inspection.Metadata)
 		asset := Asset{
 			TenantID: project.TenantID, ProjectID: project.ID, Filename: session.Filename,
-			ObjectKey: destination, URI: h.storage.URI(destination), ContentType: "application/octet-stream",
-			Size: session.TotalSize, Status: AssetInvalid, Metadata: "{}", ErrorCode: "IMAGE_DECODE_FAILED",
+			ObjectKey: destination, URI: h.storage.URI(destination), SHA256: inspection.Hash,
+			ContentType: firstNonEmpty(inspection.ContentType, "application/octet-stream"),
+			Size:        session.TotalSize, MediaKind: inspection.MediaKind, Status: AssetInvalid,
+			Metadata: string(metadata), ErrorCode: errorCode,
 			ErrorMessage: inspectErr.Error(), CreatedBy: c.GetUint64("user_id"),
 		}
 		_ = h.db.Create(&asset).Error
-		h.failUploadWithAsset(session, asset.ID, "IMAGE_DECODE_FAILED", inspectErr.Error())
-		httpx.Fail(c, 422, 422, "文件不是受支持的完整图像")
+		h.failUploadWithAsset(session, asset.ID, errorCode, inspectErr.Error())
+		httpx.Fail(c, 422, 422, "文件质量检查未通过："+inspectErr.Error())
 		return
 	}
 	var duplicate Asset
-	hasDuplicate := h.db.Where("tenant_id = ? AND project_id = ? AND sha256 = ? AND status = ?", project.TenantID, project.ID, hash, AssetReady).First(&duplicate).Error == nil
+	hasDuplicate := h.db.Where("tenant_id = ? AND project_id = ? AND sha256 = ? AND status = ?", project.TenantID, project.ID, inspection.Hash, AssetReady).First(&duplicate).Error == nil
 	if hasDuplicate && session.DuplicatePolicy == "SKIP" {
 		_ = h.storage.Delete(c.Request.Context(), destination)
 		_ = h.storage.Delete(c.Request.Context(), thumbnailKey)
@@ -358,13 +590,30 @@ func (h *Handler) UploadComplete(c *gin.Context) {
 		httpx.OK(c, gin.H{"asset": duplicate, "duplicate": true, "strategy": "SKIP"})
 		return
 	}
-	metadata, _ := json.Marshal(gin.H{"declaredContentType": session.DeclaredType, "actualFormat": contentType})
+	var supplied map[string]any
+	_ = json.Unmarshal([]byte(session.Metadata), &supplied)
+	for key, value := range supplied {
+		inspection.Metadata[key] = value
+	}
+	if inspection.Language == "" {
+		inspection.Language = assetMetadataString(supplied, "language")
+	}
+	if inspection.SourceDevice == "" {
+		inspection.SourceDevice = assetMetadataString(supplied, "sourceDevice")
+	}
+	businessScene := assetMetadataString(supplied, "businessScene")
+	inspection.Metadata["declaredContentType"] = session.DeclaredType
+	metadata, _ := json.Marshal(inspection.Metadata)
 	asset := Asset{
 		TenantID: project.TenantID, ProjectID: project.ID, Filename: session.Filename,
-		ObjectKey: destination, URI: h.storage.URI(destination), SHA256: hash, ContentType: contentType,
-		ThumbnailObjectKey: thumbnailKey, ThumbnailURI: h.storage.URI(thumbnailKey),
-		Size: size, Width: width, Height: height, Status: AssetReady,
+		ObjectKey: destination, URI: h.storage.URI(destination), SHA256: inspection.Hash, ContentType: inspection.ContentType,
+		Size: inspection.Size, Width: inspection.Width, Height: inspection.Height, MediaKind: inspection.MediaKind,
+		DurationSeconds: inspection.DurationSeconds, Codec: inspection.Codec, Language: inspection.Language,
+		SourceDevice: inspection.SourceDevice, BusinessScene: businessScene, Status: AssetReady,
 		Metadata: string(metadata), CreatedBy: c.GetUint64("user_id"),
+	}
+	if inspection.MediaKind == "IMAGE" {
+		asset.ThumbnailObjectKey, asset.ThumbnailURI = thumbnailKey, h.storage.URI(thumbnailKey)
 	}
 	if hasDuplicate && session.DuplicatePolicy == "REFERENCE" {
 		_ = h.storage.Delete(c.Request.Context(), destination)
@@ -387,6 +636,14 @@ func (h *Handler) UploadComplete(c *gin.Context) {
 	}
 	h.cleanupChunks(c.Request.Context(), chunks)
 	httpx.OK(c, gin.H{"asset": asset, "duplicate": hasDuplicate, "strategy": session.DuplicatePolicy})
+}
+
+func assetMetadataString(values map[string]any, key string) string {
+	value, exists := values[key]
+	if !exists || value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
 }
 
 func (h *Handler) failUpload(session UploadSession, code, message string) {
@@ -427,6 +684,35 @@ func (h *Handler) AssetPage(c *gin.Context) {
 	if keyword := strings.TrimSpace(c.Query("keyword")); keyword != "" {
 		query = query.Where("filename LIKE ? OR sha256 LIKE ?", "%"+keyword+"%", keyword+"%")
 	}
+	if mediaKind := strings.ToUpper(strings.TrimSpace(c.Query("mediaKind"))); mediaKind != "" {
+		query = query.Where("media_kind = ?", mediaKind)
+	}
+	if errorCode := strings.ToUpper(strings.TrimSpace(c.Query("errorCode"))); errorCode != "" {
+		query = query.Where("error_code = ?", errorCode)
+	}
+	if sourceDevice := strings.TrimSpace(c.Query("sourceDevice")); sourceDevice != "" {
+		query = query.Where("source_device LIKE ?", "%"+sourceDevice+"%")
+	}
+	if businessScene := strings.TrimSpace(c.Query("businessScene")); businessScene != "" {
+		query = query.Where("business_scene LIKE ?", "%"+businessScene+"%")
+	}
+	tagValues := c.QueryArray("tagDefinitionIds")
+	if len(tagValues) == 0 && strings.TrimSpace(c.Query("tagDefinitionIds")) != "" {
+		tagValues = strings.Split(c.Query("tagDefinitionIds"), ",")
+	}
+	tagIDs := make([]uint64, 0, len(tagValues))
+	for _, value := range tagValues {
+		if id, err := strconv.ParseUint(strings.TrimSpace(value), 10, 64); err == nil && id > 0 {
+			tagIDs = append(tagIDs, id)
+		}
+	}
+	if len(tagIDs) > 0 {
+		query = query.Where(`id IN (
+			SELECT asset_id FROM ai_asset_tag
+			WHERE tenant_id = ? AND project_id = ? AND definition_id IN ?
+			GROUP BY asset_id HAVING COUNT(DISTINCT definition_id) = ?
+		)`, project.TenantID, project.ID, tagIDs, len(tagIDs))
+	}
 	var total int64
 	query.Count(&total)
 	pageNo, pageSize := page(c)
@@ -434,11 +720,23 @@ func (h *Handler) AssetPage(c *gin.Context) {
 	query.Order("id DESC").Offset((pageNo - 1) * pageSize).Limit(pageSize).Find(&rows)
 	type assetPageView struct {
 		Asset
-		ThumbnailURL string `json:"thumbnailUrl"`
+		ThumbnailURL    string         `json:"thumbnailUrl"`
+		Tags            []assetTagView `json:"tags"`
+		PurgeEligibleAt *time.Time     `json:"purgeEligibleAt,omitempty"`
 	}
+	retentionDays := assetRecycleRetentionDays(h.db, project)
+	assetIDs := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		assetIDs = append(assetIDs, row.ID)
+	}
+	tagsByAsset := assetTagViews(h.db, project, assetIDs)
 	result := make([]assetPageView, 0, len(rows))
 	for _, row := range rows {
-		view := assetPageView{Asset: row}
+		view := assetPageView{Asset: row, Tags: tagsByAsset[row.ID]}
+		if row.Status == AssetDeleted && row.DeletedAt != nil {
+			eligibleAt := row.DeletedAt.Add(time.Duration(retentionDays) * 24 * time.Hour)
+			view.PurgeEligibleAt = &eligibleAt
+		}
 		if h.storage != nil && row.ThumbnailObjectKey != "" {
 			if signed, err := h.storage.PresignedGet(c.Request.Context(), row.ThumbnailObjectKey, 10*time.Minute); err == nil {
 				view.ThumbnailURL = signed.String()
@@ -488,7 +786,108 @@ func (h *Handler) AssetGet(c *gin.Context) {
 			thumbnailURL = signed.String()
 		}
 	}
-	httpx.OK(c, gin.H{"asset": asset, "metadata": metadata, "previewUrl": previewURL, "thumbnailUrl": thumbnailURL, "previewExpiresIn": 600})
+	type referenceView struct {
+		ResourceType string `json:"resourceType"`
+		ResourceID   uint64 `json:"resourceId"`
+		Name         string `json:"name"`
+		Status       string `json:"status"`
+		Frozen       bool   `json:"frozen"`
+	}
+	references := make([]referenceView, 0)
+	var storedReferences []AssetReference
+	h.db.Where("tenant_id = ? AND project_id = ? AND asset_id = ?", project.TenantID, project.ID, asset.ID).
+		Order("resource_type,resource_id").Find(&storedReferences)
+	for _, reference := range storedReferences {
+		name, status := "", ""
+		switch reference.ResourceType {
+		case "DATASET_VERSION":
+			var version DatasetVersion
+			if h.db.Where("tenant_id = ? AND project_id = ? AND id = ?", project.TenantID, project.ID, reference.ResourceID).
+				First(&version).Error == nil {
+				name, status = version.SemanticVersion, string(version.Status)
+			}
+		case "ASSET_COLLECTION":
+			var collection AssetCollection
+			if h.db.Where("tenant_id = ? AND project_id = ? AND id = ?", project.TenantID, project.ID, reference.ResourceID).
+				First(&collection).Error == nil {
+				name = collection.Name
+				if collection.Frozen {
+					status = "FROZEN"
+				}
+			}
+		}
+		references = append(references, referenceView{
+			ResourceType: reference.ResourceType, ResourceID: reference.ResourceID,
+			Name: name, Status: status, Frozen: reference.Frozen,
+		})
+	}
+	var annotationReferences []struct {
+		ID     uint64
+		Name   string
+		Status string
+	}
+	h.db.Table("ai_annotation_task AS task").
+		Select("DISTINCT task.id, task.name, task.status").
+		Joins("JOIN ai_asset_collection_item AS item ON item.collection_id = task.collection_id AND item.tenant_id = task.tenant_id").
+		Where("task.tenant_id = ? AND task.project_id = ? AND item.asset_id = ?", project.TenantID, project.ID, asset.ID).
+		Order("task.id").Scan(&annotationReferences)
+	for _, reference := range annotationReferences {
+		references = append(references, referenceView{
+			ResourceType: "ANNOTATION_TASK", ResourceID: reference.ID,
+			Name: reference.Name, Status: reference.Status,
+		})
+	}
+	var feedbackReferences []struct {
+		ID     uint64
+		Name   string
+		Status string
+	}
+	h.db.Table("ai_feedback_batch AS batch").
+		Select("DISTINCT batch.id, batch.name, batch.status").
+		Joins("JOIN ai_feedback_sample AS sample ON sample.batch_id = batch.id AND sample.tenant_id = batch.tenant_id").
+		Where("batch.tenant_id = ? AND batch.project_id = ? AND sample.asset_id = ?", project.TenantID, project.ID, asset.ID).
+		Order("batch.id").Scan(&feedbackReferences)
+	for _, reference := range feedbackReferences {
+		references = append(references, referenceView{
+			ResourceType: "FEEDBACK_BATCH", ResourceID: reference.ID,
+			Name: reference.Name, Status: reference.Status,
+		})
+	}
+	httpx.OK(c, gin.H{
+		"asset": asset, "metadata": metadata, "tags": assetTagViews(h.db, project, []uint64{asset.ID})[asset.ID],
+		"references": references, "previewUrl": previewURL, "thumbnailUrl": thumbnailURL, "previewExpiresIn": 600,
+		"recycleRetentionDays": assetRecycleRetentionDays(h.db, project),
+		"purgeEligibleAt":      assetPurgeEligibleAt(asset, assetRecycleRetentionDays(h.db, project)),
+	})
+}
+
+func assetRecycleRetentionDays(db *gorm.DB, project Project) int {
+	const defaultDays = 30
+	var configRow ProjectConfig
+	if db.Where("tenant_id = ? AND project_id = ?", project.TenantID, project.ID).First(&configRow).Error != nil {
+		return defaultDays
+	}
+	var storageConfig map[string]any
+	if json.Unmarshal([]byte(configRow.StorageConfig), &storageConfig) != nil {
+		return defaultDays
+	}
+	value, ok := storageConfig["recycleRetentionDays"]
+	if !ok {
+		return defaultDays
+	}
+	days, err := strconv.Atoi(fmt.Sprint(value))
+	if err != nil || days < 1 || days > 3650 {
+		return defaultDays
+	}
+	return days
+}
+
+func assetPurgeEligibleAt(asset Asset, retentionDays int) *time.Time {
+	if asset.Status != AssetDeleted || asset.DeletedAt == nil {
+		return nil
+	}
+	eligibleAt := asset.DeletedAt.Add(time.Duration(retentionDays) * 24 * time.Hour)
+	return &eligibleAt
 }
 
 // AssetDelete godoc
@@ -506,8 +905,13 @@ func (h *Handler) AssetDelete(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if asset.Status == AssetDeleted || asset.Status == AssetPurged {
+		httpx.Fail(c, 409, 409, "资产已在回收站或已物理清理")
+		return
+	}
 	now := time.Now()
 	before := asset
+	asset.RecycleFromStatus = asset.Status
 	asset.Status, asset.DeletedAt, asset.DeletedBy = AssetDeleted, &now, c.GetUint64("user_id")
 	if err := h.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&asset).Error; err != nil {
@@ -539,13 +943,25 @@ func (h *Handler) AssetRestore(c *gin.Context) {
 		}
 		return
 	}
-	asset.Status, asset.DeletedAt, asset.DeletedBy = AssetReady, nil, 0
+	asset.Status = restoredAssetStatus(asset)
+	asset.RecycleFromStatus, asset.DeletedAt, asset.DeletedBy = "", nil, 0
 	if err := h.db.Save(&asset).Error; err != nil {
 		httpx.Fail(c, 500, 500, "资产恢复失败")
 		return
 	}
 	_ = appendAudit(h.db, c, project.ID, "ASSET_RESTORED", "ASSET", asset.ID, nil, asset)
 	httpx.OK(c, asset)
+}
+
+func restoredAssetStatus(asset Asset) AssetStatus {
+	switch asset.RecycleFromStatus {
+	case AssetReady, AssetInvalid, AssetMissing:
+		return asset.RecycleFromStatus
+	}
+	if asset.ErrorCode != "" {
+		return AssetInvalid
+	}
+	return AssetReady
 }
 
 // AssetPurge godoc
@@ -564,6 +980,16 @@ func (h *Handler) AssetPurge(c *gin.Context) {
 		if ok {
 			httpx.Fail(c, 409, 409, "仅回收站资产可物理清理")
 		}
+		return
+	}
+	retentionDays := assetRecycleRetentionDays(h.db, project)
+	eligibleAt := assetPurgeEligibleAt(asset, retentionDays)
+	if eligibleAt == nil {
+		httpx.Fail(c, 409, 409, "回收站资产缺少删除时间，不能自动物理清理")
+		return
+	}
+	if time.Now().Before(*eligibleAt) {
+		httpx.Fail(c, 409, 409, fmt.Sprintf("资产仍在 %d 天回收站保留期内，最早可于 %s 清理", retentionDays, eligibleAt.Format(time.RFC3339)))
 		return
 	}
 	var frozen, shared int64
@@ -604,9 +1030,96 @@ func (h *Handler) AssetQuality(c *gin.Context) {
 		Status AssetStatus `json:"status"`
 		Count  int64       `json:"count"`
 	}
-	var counts []statusCount
+	counts := make([]statusCount, 0)
 	h.db.Model(&Asset{}).Select("status, count(*) as count").Where("tenant_id = ? AND project_id = ?", project.TenantID, project.ID).Group("status").Scan(&counts)
 	var duplicateGroups int64
 	h.db.Raw("SELECT COUNT(*) FROM (SELECT sha256 FROM ai_asset WHERE tenant_id = ? AND project_id = ? AND status = ? GROUP BY sha256 HAVING COUNT(*) > 1) d", project.TenantID, project.ID, AssetReady).Scan(&duplicateGroups)
-	httpx.OK(c, gin.H{"byStatus": counts, "duplicateGroups": duplicateGroups})
+	var nearDuplicateGroups int64
+	h.db.Raw("SELECT COUNT(DISTINCT near_duplicate_of_id) FROM ai_asset WHERE tenant_id = ? AND project_id = ? AND status = ? AND near_duplicate_of_id > 0", project.TenantID, project.ID, AssetReady).Scan(&nearDuplicateGroups)
+	httpx.OK(c, gin.H{"byStatus": counts, "duplicateGroups": duplicateGroups, "nearDuplicateGroups": nearDuplicateGroups})
+}
+
+// AssetSimilarityAnalyze godoc
+// @Summary Analyze project image similarity through FiftyOne
+// @Tags VisionAI Asset
+// @Security BearerAuth
+// @Param distanceThreshold query int false "64-bit perceptual hash Hamming distance (0..32)"
+// @Success 200 {object} httpx.Response
+// @Router /ai-platform/projects/{id}/assets/similarity [post]
+func (h *Handler) AssetSimilarityAnalyze(c *gin.Context) {
+	project, ok := h.projectAccess(c, true)
+	if !ok || !h.requireProjectRole(c, project, "DATA_MANAGER") || !h.storageReady(c) {
+		return
+	}
+	threshold, err := strconv.Atoi(c.DefaultQuery("distanceThreshold", "6"))
+	if err != nil || threshold < 0 || threshold > 32 {
+		httpx.Fail(c, 400, 400, "近似重复距离必须在 0 到 32 之间")
+		return
+	}
+	var assets []Asset
+	if h.db.Where(
+		"tenant_id = ? AND project_id = ? AND status = ? AND media_kind = ?",
+		project.TenantID, project.ID, AssetReady, "IMAGE",
+	).Order("id").Limit(5000).Find(&assets).Error != nil {
+		httpx.Fail(c, 500, 500, "资产列表读取失败")
+		return
+	}
+	if len(assets) == 0 {
+		httpx.Fail(c, 409, 409, "项目中没有可分析的图像")
+		return
+	}
+	samples := make([]evaluationplatform.SimilaritySample, 0, len(assets))
+	for _, asset := range assets {
+		signed, signErr := h.storage.PresignedGet(c.Request.Context(), asset.ObjectKey, 30*time.Minute)
+		if signErr != nil {
+			httpx.Fail(c, 503, 503, "图像读取地址生成失败")
+			return
+		}
+		samples = append(samples, evaluationplatform.SimilaritySample{
+			AssetID: asset.ID, Filename: asset.Filename, SourceURL: signed.String(),
+		})
+	}
+	cfg := config.Load()
+	result, analyzeErr := evaluationplatform.NewClient(cfg.FiftyOneAPIURL, cfg.FiftyOneTimeout).
+		AnalyzeSimilarity(c.Request.Context(), evaluationplatform.SimilarityRequest{
+			Name:      "visionai-similarity-project-" + strconv.FormatUint(project.ID, 10),
+			ProjectID: project.ID, DistanceThreshold: threshold, Samples: samples,
+		})
+	if analyzeErr != nil {
+		httpx.Fail(c, 502, 502, "FiftyOne 近似重复分析失败："+analyzeErr.Error())
+		return
+	}
+	err = h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&Asset{}).Where("tenant_id = ? AND project_id = ?", project.TenantID, project.ID).
+			Updates(map[string]any{"perceptual_hash": "", "near_duplicate_of_id": 0}).Error; err != nil {
+			return err
+		}
+		for rawID, hash := range result.Hashes {
+			assetID, parseErr := strconv.ParseUint(rawID, 10, 64)
+			if parseErr != nil {
+				continue
+			}
+			if err := tx.Model(&Asset{}).Where("tenant_id = ? AND project_id = ? AND id = ?", project.TenantID, project.ID, assetID).
+				Update("perceptual_hash", hash).Error; err != nil {
+				return err
+			}
+		}
+		for _, group := range result.Groups {
+			for _, assetID := range group.AssetIDs {
+				if err := tx.Model(&Asset{}).Where("tenant_id = ? AND project_id = ? AND id = ?", project.TenantID, project.ID, assetID).
+					Update("near_duplicate_of_id", group.CanonicalAssetID).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return appendAudit(tx, c, project.ID, "ASSET_SIMILARITY_ANALYZED", "PROJECT", project.ID, nil, gin.H{
+			"provider": "FIFTYONE", "analyzedCount": result.AnalyzedCount,
+			"groupCount": len(result.Groups), "distanceThreshold": threshold,
+		})
+	})
+	if err != nil {
+		httpx.Fail(c, 500, 500, "近似重复分析结果保存失败")
+		return
+	}
+	httpx.OK(c, result)
 }
